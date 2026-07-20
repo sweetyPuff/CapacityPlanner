@@ -48,7 +48,7 @@ def test_multi_sku_and_vm_spec(tmp_path):
     assert set(pi.skus) == {"default-64", "big-128"}
     a1 = Pool(fab="A", bm_group="network1")
     assert pi.current_by_sku(a1) == {"default-64": 50, "big-128": 3}
-    assert pi.movein_by_sku(a1, "2026-09") == {"big-128": 5}
+    assert pi.movein_by_sku(a1, "2026-09") == {"default-64": 25, "big-128": 5}
     assert pi.vm_batch(a1, "2026-08") == [(32, 4)]
 
 
@@ -60,4 +60,5 @@ def test_unknown_sku_reported_and_skipped(tmp_path):
     pi = import_v2(path)
     errors = [i for i in pi.issues if i.severity == "error"]
     assert any("no-such-sku" in i.message for i in errors)
-    assert pi.movein_by_sku(Pool(fab="A", bm_group="network1"), "2026-09") == {}
+    # 2026-09 default-64 movein 來自 fixture 既有的 summary Q3=25;僅 no-such-sku 該列被跳過
+    assert pi.movein_by_sku(Pool(fab="A", bm_group="network1"), "2026-09") == {"default-64": 25}
