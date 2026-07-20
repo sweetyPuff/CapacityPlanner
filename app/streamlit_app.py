@@ -1,6 +1,8 @@
 """容量規劃工具 UI。邏輯全在 captool,本檔僅做狀態管理與呈現。"""
 import io
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -10,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from captool.exporter import export_summary, generate_v2_template
 from captool.importer import CapacityImportError, import_any
-from captool.models import ImportIssue, Pool, Sku
+from captool.models import ImportIssue, Pool
 from captool.planner import run_check, run_suggest
 from captool.solver.naive import NaiveSolver
 from captool.viewmodel import (apply_movein_edits, movein_frame,
@@ -22,10 +24,12 @@ MODE_LABELS = {"conservative": "保守(跨月零頭作廢)", "gap_fill": "填縫
 
 
 def _load(uploaded) -> None:
-    tmp = Path(st.session_state.get("_tmpdir", ".")) / "_uploaded.xlsx"
-    tmp.write_bytes(uploaded.getvalue())
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    tmp_file.write(uploaded.getvalue())
+    tmp_path = tmp_file.name
+    tmp_file.close()
     try:
-        st.session_state["plan_input"] = import_any(tmp)
+        st.session_state["plan_input"] = import_any(tmp_path)
         st.session_state["source_name"] = uploaded.name
     except CapacityImportError as e:
         st.session_state.pop("plan_input", None)
@@ -33,6 +37,11 @@ def _load(uploaded) -> None:
     except Exception:
         st.session_state.pop("plan_input", None)
         st.session_state["fatal_issues"] = [ImportIssue("error", "", "", "無法讀取檔案:請確認為有效的 Excel (.xlsx) 檔案")]
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 with st.sidebar:
