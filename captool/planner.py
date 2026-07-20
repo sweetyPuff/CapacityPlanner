@@ -121,3 +121,49 @@ def _run_excel_compat(plan_input: PlanInput) -> PlanResult:
                 stock_total={}, stock_empty={}, free_vcore_total=0.0,
                 stock_float=stock))
     return PlanResult(mode="excel_compat", outcomes=outcomes)
+
+
+def run_suggest(plan_input: PlanInput, solver: AllocationSolver,
+                catalog: list[Sku], mode: Mode = "conservative"
+                ) -> tuple[PlanResult, list[MoveIn]]:
+    if mode == "excel_compat":
+        raise ValueError("回推模式不支援 excel_compat")
+    outcomes: list[MonthOutcome] = []
+    suggested: list[MoveIn] = []
+    for pool in plan_input.pools:
+        state = _initial_state(plan_input, pool)
+        backlog = DemandBatch()
+        for month in plan_input.months:
+            movein = plan_input.movein_by_sku(pool, month)
+            returns = plan_input.return_by_sku(pool, month)
+            for sku_name, cnt in movein.items():
+                state.add_empty(plan_input.skus[sku_name], cnt)
+            for sku_name, cnt in returns.items():
+                state.add_empty(plan_input.skus[sku_name], cnt)
+            demand = plan_input.demand_vcore(pool, month)
+            batch = DemandBatch(
+                liquid_vcore=demand + backlog.liquid_vcore,
+                atomic_vms=_merge_vms(backlog.atomic_vms,
+                                      plan_input.vm_batch(pool, month)))
+            sres = solver.suggest(state, batch, catalog)
+            result = sres.result
+            for sku_name, cnt in sres.purchases.items():
+                suggested.append(MoveIn(pool=pool, sku_name=sku_name,
+                                        month=month, count=cnt))
+            backlog = DemandBatch(liquid_vcore=result.unplaced_liquid_vcore,
+                                  atomic_vms=list(result.blocked_vms))
+            if mode == "conservative":
+                state.drop_partial_leftovers()
+            outcomes.append(MonthOutcome(
+                pool=pool, month=month, demand_vcore=demand,
+                vm_demand=plan_input.vm_batch(pool, month),
+                movein=movein, returns=returns,
+                feasible=result.feasible,
+                shortfall_vcore=result.shortfall_vcore,
+                blocked_vms=list(result.blocked_vms),
+                machines_opened=dict(result.machines_opened),
+                stock_total=state.total_count(),
+                stock_empty=state.empty_count(),
+                free_vcore_total=state.free_vcore_total(),
+                suggested_purchases=dict(sres.purchases)))
+    return PlanResult(mode=mode, outcomes=outcomes), suggested

@@ -94,3 +94,30 @@ def test_excel_compat_requires_single_sku():
     pi.skus["big-128"] = Sku(name="big-128", vcore_per_node=128, usable_ratio=0.8)
     with pytest.raises(ValueError):
         run_check(pi, NaiveSolver(), mode="excel_compat")
+
+
+def test_run_suggest_fills_gap():
+    from captool.planner import run_suggest
+    pi = _pi(demands=[("2026-07", 120), ("2026-08", 60)], current=0)
+    result, suggested = run_suggest(pi, NaiveSolver(), [SKU])
+    o7, o8 = result.for_pool(P)
+    assert o7.feasible and o8.feasible
+    assert o7.suggested_purchases == {"default-64": 3}   # ceil(120/51.2)
+    assert result.gap_months == []
+    assert [(m.month, m.count) for m in suggested if m.pool == P] == [
+        ("2026-07", 3), ("2026-08", 2)]                   # 保守模式:8 月再開 2 台
+
+
+def test_run_suggest_no_purchase_when_stock_enough():
+    from captool.planner import run_suggest
+    pi = _pi(demands=[("2026-07", 100)], current=10, months=("2026-07",))
+    result, suggested = run_suggest(pi, NaiveSolver(), [SKU])
+    assert suggested == []
+    assert result.for_pool(P)[0].suggested_purchases == {}
+
+
+def test_run_suggest_rejects_excel_compat():
+    from captool.planner import run_suggest
+    with pytest.raises(ValueError):
+        run_suggest(_pi(demands=[("2026-07", 1)]), NaiveSolver(), [SKU],
+                    mode="excel_compat")
