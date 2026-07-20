@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from captool.exporter import export_summary, generate_v2_template
 from captool.importer import CapacityImportError, import_any
-from captool.models import Pool, Sku
+from captool.models import ImportIssue, Pool, Sku
 from captool.planner import run_check, run_suggest
 from captool.solver.naive import NaiveSolver
 from captool.viewmodel import (apply_movein_edits, movein_frame,
@@ -30,6 +30,9 @@ def _load(uploaded) -> None:
     except CapacityImportError as e:
         st.session_state.pop("plan_input", None)
         st.session_state["fatal_issues"] = e.issues
+    except Exception:
+        st.session_state.pop("plan_input", None)
+        st.session_state["fatal_issues"] = [ImportIssue("error", "", "", "無法讀取檔案:請確認為有效的 Excel (.xlsx) 檔案")]
 
 
 with st.sidebar:
@@ -76,7 +79,10 @@ if page == "匯入報告":
         st.success("未發現問題。")
     for issue in plan_input.issues:
         text = f"[{issue.sheet}!{issue.cell}] {issue.message}"
-        st.error(text) if issue.severity == "error" else st.warning(text)
+        if issue.severity == "error":
+            st.error(text)
+        else:
+            st.warning(text)
 
 elif page == "總覽":
     st.header("總覽")
