@@ -96,8 +96,8 @@ def import_v2(path) -> PlanInput:
         if sku_name is None:
             continue
         pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
-        currents.append(CurrentStock(pool=pool, sku_name=sku_name,
-                                     count=int(rec["count"] or 0)))
+        count = int(_numeric(rec["count"], issues, "HW_Current", f"D{rec['_row']}"))
+        currents.append(CurrentStock(pool=pool, sku_name=sku_name, count=count))
     moveins: list[MoveIn] = []
     for rec in _read_table(wb_v["HW_MoveIn"],
                            ["fab", "bm_group", "sku", "month", "count"],
@@ -110,8 +110,8 @@ def import_v2(path) -> PlanInput:
             continue
         months.add(month)
         pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
-        moveins.append(MoveIn(pool=pool, sku_name=sku_name, month=month,
-                              count=int(rec["count"] or 0)))
+        count = int(_numeric(rec["count"], issues, "HW_MoveIn", f"E{rec['_row']}"))
+        moveins.append(MoveIn(pool=pool, sku_name=sku_name, month=month, count=count))
 
     # VM_Spec
     vm_demands: list[VmSpecDemand] = []
@@ -126,9 +126,11 @@ def import_v2(path) -> PlanInput:
             continue
         months.add(month)
         pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
+        vm_size_vcore = int(_numeric(rec["vm_size_vcore"], issues, "VM_Spec", f"E{rec['_row']}"))
+        count = int(_numeric(rec["count"], issues, "VM_Spec", f"F{rec['_row']}"))
         vm_demands.append(VmSpecDemand(
             pool=pool, product=product, month=month,
-            vm_size_vcore=int(rec["vm_size_vcore"]), count=int(rec["count"] or 0)))
+            vm_size_vcore=vm_size_vcore, count=count))
 
     # 廠區 tabs:需求區同 legacy;Return 區 K/L/M + 月份自 N(14)
     demands: list[DemandDelta] = []
@@ -179,7 +181,9 @@ def import_v2(path) -> PlanInput:
 
     pools = sorted({c.pool for c in currents}
                    | {d.pool for d in demands}
-                   | {m.pool for m in moveins},
+                   | {m.pool for m in moveins}
+                   | {v.pool for v in vm_demands}
+                   | {r.pool for r in returns},
                    key=lambda p: (p.fab, p.bm_group))
     return PlanInput(skus=skus, months=sorted(months), pools=pools,
                      demands=demands, vm_demands=vm_demands,

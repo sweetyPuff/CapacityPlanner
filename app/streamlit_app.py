@@ -24,6 +24,7 @@ MODE_LABELS = {"conservative": "保守(跨月零頭作廢)", "gap_fill": "填縫
 
 
 def _load(uploaded) -> None:
+    st.session_state.pop("suggest", None)
     tmp_file = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     tmp_file.write(uploaded.getvalue())
     tmp_path = tmp_file.name
@@ -31,6 +32,7 @@ def _load(uploaded) -> None:
     try:
         st.session_state["plan_input"] = import_any(tmp_path)
         st.session_state["source_name"] = uploaded.name
+        st.session_state["source_file_id"] = uploaded.file_id
     except CapacityImportError as e:
         st.session_state.pop("plan_input", None)
         st.session_state["fatal_issues"] = e.issues
@@ -47,7 +49,7 @@ def _load(uploaded) -> None:
 with st.sidebar:
     st.title("容量規劃工具")
     uploaded = st.file_uploader("上傳 Excel(舊格式或 v2)", type=["xlsx"])
-    if uploaded is not None and st.session_state.get("source_name") != uploaded.name:
+    if uploaded is not None and st.session_state.get("source_file_id") != uploaded.file_id:
         _load(uploaded)
     mode = st.radio("推演模式", list(MODE_LABELS), format_func=MODE_LABELS.get)
     page = st.radio("頁面", ["匯入報告", "總覽", "驗證模式", "回推模式", "配置明細"])

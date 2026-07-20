@@ -111,10 +111,10 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
             wf.cell(row=rows[key], column=col, value=d.vcore)
         # 帶入既有 Return(機型填 default)
         fab_returns = [x for x in plan_input.returns if x.pool.fab == fab]
-        rrows: dict[tuple[str, str], int] = {}
+        rrows: dict[tuple[str, str, str], int] = {}
         r = 5
         for x in fab_returns:
-            key = (x.product, x.pool.bm_group)
+            key = (x.product, x.pool.bm_group, x.sku_name)
             if key not in rrows:
                 rrows[key] = r
                 wf.cell(row=r, column=11, value=x.product)
@@ -153,6 +153,9 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
                 example_month, 32, 2])
     for cell in ws4[2]:
         cell.fill = _YELLOW
+    for v in plan_input.vm_demands:
+        ws4.append([v.pool.fab, v.pool.bm_group, v.product, v.month,
+                    v.vm_size_vcore, v.count])
     for sheet in (ws1, ws2, ws3, ws4):
         for row in sheet.iter_rows():
             for cell in row:
