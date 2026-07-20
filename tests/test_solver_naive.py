@@ -75,3 +75,46 @@ def test_multi_sku_check():
     result = NaiveSolver().check(state, DemandBatch(atomic_vms=[(100, 1), (40, 1)]))
     assert result.feasible
     assert result.machines_opened == {"big-128": 1, "default-64": 1}
+
+
+def test_suggest_single_sku_buys_ceiling():
+    state = PoolState()  # 沒庫存
+    sres = NaiveSolver().suggest(state, DemandBatch(liquid_vcore=870), [SKU64])
+    assert sres.result.feasible
+    assert sres.purchases == {"default-64": 17}  # ceil(870/51.2)
+    assert state.total_count() == {"default-64": 17}
+
+
+def test_suggest_no_purchase_needed():
+    state = _state(count=20)
+    sres = NaiveSolver().suggest(state, DemandBatch(liquid_vcore=100), [SKU64])
+    assert sres.purchases == {}
+    assert sres.result.feasible
+
+
+def test_suggest_picks_biggest_sellable_sku():
+    state = PoolState()
+    sres = NaiveSolver().suggest(state, DemandBatch(liquid_vcore=100), [SKU64, SKU128])
+    assert sres.result.feasible
+    assert sres.purchases == {"big-128": 1}
+
+
+def test_suggest_atomic_converges():
+    # (32,3)=96 vcore:1 台 51.2 只裝 1 顆,貪婪要迭代補到 3 台
+    state = PoolState()
+    sres = NaiveSolver().suggest(state, DemandBatch(atomic_vms=[(32, 3)]), [SKU64])
+    assert sres.result.feasible
+    assert sres.purchases == {"default-64": 3}
+
+
+def test_suggest_unfittable_vm_returns_infeasible():
+    state = PoolState()
+    sres = NaiveSolver().suggest(state, DemandBatch(atomic_vms=[(200, 1)]), [SKU64, SKU128])
+    assert not sres.result.feasible
+    assert sres.purchases == {}
+    assert sres.result.blocked_vms == [(200, 1)]
+
+
+def test_suggest_empty_catalog_raises():
+    with pytest.raises(ValueError):
+        NaiveSolver().suggest(PoolState(), DemandBatch(liquid_vcore=1), [])
