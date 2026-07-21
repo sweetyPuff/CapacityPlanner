@@ -2,10 +2,8 @@
 原子 VM 用 first-fit-decreasing(填縫優先),液體 vcore 填縫後開空機。
 單一機型情境退化為「除法 + 無條件進位」。
 """
-import copy
-import math
-
 from captool.models import Sku
+from captool.solver.greedy import MAX_TOTAL_PURCHASE, greedy_suggest
 from captool.solver.interface import (CheckResult, DemandBatch, PoolState,
                                       SuggestResult)
 
@@ -14,7 +12,7 @@ _EPS = 1e-9
 
 class NaiveSolver:
 
-    MAX_TOTAL_PURCHASE = 100_000
+    MAX_TOTAL_PURCHASE = MAX_TOTAL_PURCHASE
 
     def check(self, pool_state: PoolState, new_demand: DemandBatch) -> CheckResult:
         opened: dict[str, int] = {}
@@ -70,26 +68,5 @@ class NaiveSolver:
 
     def suggest(self, pool_state: PoolState, new_demand: DemandBatch,
                 catalog: list[Sku]) -> SuggestResult:
-        if not catalog:
-            raise ValueError("catalog 不可為空")
-        best = max(catalog, key=lambda s: s.sellable_vcore)
-        max_vm = max((size for size, _ in new_demand.atomic_vms), default=0)
-        if max_vm > best.sellable_vcore + _EPS:
-            # 任何機型單台都裝不下的 VM:直接回報不可行(不採購)
-            result = self.check(pool_state, new_demand)
-            return SuggestResult(purchases={}, result=result)
-
-        purchases: dict[str, int] = {}
-        while True:
-            trial = copy.deepcopy(pool_state)
-            for name, cnt in purchases.items():
-                sku = next(s for s in catalog if s.name == name)
-                trial.add_empty(sku, cnt)
-            result = self.check(trial, new_demand)
-            if result.feasible:
-                pool_state.machines[:] = trial.machines
-                return SuggestResult(purchases=purchases, result=result)
-            need = max(1, math.ceil(result.shortfall_vcore / best.sellable_vcore))
-            purchases[best.name] = purchases.get(best.name, 0) + need
-            if sum(purchases.values()) > self.MAX_TOTAL_PURCHASE:
-                raise RuntimeError("suggest 未收斂:採購量超過上限")
+        return greedy_suggest(self.check, pool_state, new_demand, catalog,
+                              self.MAX_TOTAL_PURCHASE)

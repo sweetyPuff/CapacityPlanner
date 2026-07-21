@@ -4,3 +4,7 @@ __pycache__/
 ~$*.xlsx
 _uploaded.xlsx
 .claude/settings.local.json
+
+# colleague solver project (separate repo, dropped in for reference)
+solver-main/
+capacity_v2_template.xlsx
