@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 ~$*.xlsx
 _uploaded.xlsx
+.claude/settings.local.json
