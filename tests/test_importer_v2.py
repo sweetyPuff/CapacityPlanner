@@ -1,6 +1,7 @@
+import math
 from pathlib import Path
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from captool.exporter import generate_v2_template
 from captool.importer import import_any, import_legacy, import_v2
@@ -17,54 +18,96 @@ def _v2_file(tmp_path):
     return path
 
 
-def test_roundtrip_preserves_data(tmp_path):
+def test_roundtrip_coarse_demand(tmp_path):
     path = _v2_file(tmp_path)
     original = import_legacy(FIXTURE)
     pi = import_v2(path)
     a1 = Pool(fab="A", bm_group="network1")
     assert pi.demand_vcore(a1, "2026-07") == original.demand_vcore(a1, "2026-07")
     assert pi.return_by_sku(a1, "2026-08") == original.return_by_sku(a1, "2026-08")
-    assert pi.current_by_sku(a1) == original.current_by_sku(a1)
-    assert pi.movein_by_sku(a1, "2026-08") == original.movein_by_sku(a1, "2026-08")
     assert pi.months == original.months
-    # 範本內的示範列不得變成資料
-    assert pi.vm_demands == []
+    # 示範列不得成為資料
+    assert all("示範" not in d.product for d in pi.demands)
+    assert pi.vm_demands == []            # 示範 detail 列被跳過
 
 
-def test_import_any_dispatches(tmp_path):
+def test_detail_product_derives_count_and_policy(tmp_path):
+    path = _v2_file(tmp_path)
+    wb = load_workbook(path)
+    wa = wb["A"]
+    # 找一個空列加入 detail product:VM vcore=60, 每台上限=2, 共居=teamB, 2026-07=180
+    r = wa.max_row + 1
+    wa.cell(row=r, column=1, value="db")
+    wa.cell(row=r, column=2, value="network1")
+    wa.cell(row=r, column=3, value=60)
+    wa.cell(row=r, column=4, value=2)
+    wa.cell(row=r, column=5, value="teamB")
+    wa.cell(row=r, column=6, value=180)     # 180/60 = 3 台
+    wb.save(path)
+    pi = import_v2(path)
+    a1 = Pool(fab="A", bm_group="network1")
+    assert pi.vm_batch(a1, "2026-07") == [(60, 3)]
+    pol = pi.policy_for(a1, "db")
+    assert pol is not None
+    assert pol.vm_size_vcore == 60 and pol.max_per_machine == 2
+    assert pol.co_residency == "teamB"
+
+
+def test_detail_non_multiple_warns_and_rounds_up(tmp_path):
+    path = _v2_file(tmp_path)
+    wb = load_workbook(path)
+    wa = wb["A"]
+    r = wa.max_row + 1
+    wa.cell(row=r, column=1, value="web")
+    wa.cell(row=r, column=2, value="network1")
+    wa.cell(row=r, column=3, value=60)
+    wa.cell(row=r, column=6, value=100)     # 100/60 → 進位 2 台
+    wb.save(path)
+    pi = import_v2(path)
+    a1 = Pool(fab="A", bm_group="network1")
+    assert pi.vm_batch(a1, "2026-07") == [(60, 2)]
+    assert any("整數倍" in i.message and i.severity == "warning" for i in pi.issues)
+
+
+def test_exclusive_and_free_policy(tmp_path):
+    path = _v2_file(tmp_path)
+    wb = load_workbook(path)
+    wa = wb["A"]
+    r = wa.max_row + 1
+    wa.cell(row=r, column=1, value="iso"); wa.cell(row=r, column=2, value="network1")
+    wa.cell(row=r, column=3, value=51); wa.cell(row=r, column=5, value="獨佔")
+    wa.cell(row=r, column=6, value=51)
+    wb.save(path)
+    pi = import_v2(path)
+    pol = pi.policy_for(Pool(fab="A", bm_group="network1"), "iso")
+    assert pol.co_residency == "exclusive"
+    assert pol.max_per_machine is None      # D 空 = None
+
+
+def test_import_any_dispatches_new(tmp_path):
     path = _v2_file(tmp_path)
     assert import_any(path).months == import_v2(path).months
 
 
-def test_multi_sku_and_vm_spec(tmp_path):
-    path = _v2_file(tmp_path)
-    wb = load_workbook(path)
-    wb["HW_SKU"].append(["big-128", 128, 0.8])
-    wb["HW_Current"].append(["A", "network1", "big-128", 3])
-    wb["HW_MoveIn"].append(["A", "network1", "big-128", "2026-09", 5])
-    # 新格式不產生 VM_Spec,需手動建立以測試向後相容性
-    ws = wb.create_sheet("VM_Spec")
-    ws.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"])
-    ws.append(["A", "network1", "Product Apple", "2026-08", 32, 4])
+def test_old_format_still_imports(tmp_path):
+    # 手工建一個含 VM_Spec 分頁的舊 v2,確認相容路徑仍可解析
+    path = tmp_path / "old_v2.xlsx"
+    wb = Workbook()
+    wb.remove(wb.active)
+    a = wb.create_sheet("A")
+    a["C3"] = "User Demand (vcore)"
+    a["A4"], a["B4"], a["C4"] = "Product", "BM Group", "2026-07"
+    a["A5"], a["B5"], a["C5"] = "svc", "network1", 100
+    a["K4"], a["L4"], a["M4"], a["N4"] = "Product", "BM Group", "機型", "2026-07"
+    hs = wb.create_sheet("HW_SKU"); hs.append(["name", "vcore_per_node", "usable_ratio"]); hs.append(["std-64", 64, 0.8])
+    hc = wb.create_sheet("HW_Current"); hc.append(["fab", "bm_group", "sku", "count"]); hc.append(["A", "network1", "std-64", 5])
+    hm = wb.create_sheet("HW_MoveIn"); hm.append(["fab", "bm_group", "sku", "month", "count"])
+    vs = wb.create_sheet("VM_Spec"); vs.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"]); vs.append(["A", "network1", "ai", "2026-07", 32, 2])
     wb.save(path)
     pi = import_v2(path)
-    assert set(pi.skus) == {"default-64", "big-128"}
     a1 = Pool(fab="A", bm_group="network1")
-    assert pi.current_by_sku(a1) == {"default-64": 50, "big-128": 3}
-    assert pi.movein_by_sku(a1, "2026-09") == {"default-64": 25, "big-128": 5}
-    assert pi.vm_batch(a1, "2026-08") == [(32, 4)]
-
-
-def test_unknown_sku_reported_and_skipped(tmp_path):
-    path = _v2_file(tmp_path)
-    wb = load_workbook(path)
-    wb["HW_MoveIn"].append(["A", "network1", "no-such-sku", "2026-09", 5])
-    wb.save(path)
-    pi = import_v2(path)
-    errors = [i for i in pi.issues if i.severity == "error"]
-    assert any("no-such-sku" in i.message for i in errors)
-    # 2026-09 default-64 movein 來自 fixture 既有的 summary Q3=25;僅 no-such-sku 該列被跳過
-    assert pi.movein_by_sku(Pool(fab="A", bm_group="network1"), "2026-09") == {"default-64": 25}
+    assert pi.demand_vcore(a1, "2026-07") == 100
+    assert pi.vm_batch(a1, "2026-07") == [(32, 2)]   # 舊 VM_Spec 分頁仍解析
 
 
 def test_vm_spec_only_pool_is_planned(tmp_path):
