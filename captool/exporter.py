@@ -1,4 +1,6 @@
 """匯出:summary 報表(工具計算結果)與 v2 範本(多機型格式)。"""
+from collections import defaultdict
+
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
@@ -112,8 +114,30 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
                 r += 1
             wf.cell(row=rows[key], column=6 + plan_input.months.index(d.month),
                     value=d.vcore)
+
+        # 帶入既有 VM-detail policy + 對應需求(每月顆數 × VM vcore)
+        fab_policies = [p for p in plan_input.policies if p.pool.fab == fab]
+        vm_counts: dict[tuple, int] = defaultdict(int)
+        for v in plan_input.vm_demands:
+            if v.pool.fab == fab:
+                vm_counts[(v.pool, v.product, v.month)] += v.count
+        for pol in fab_policies:
+            wf.cell(row=r, column=1, value=pol.product)
+            wf.cell(row=r, column=2, value=pol.pool.bm_group)
+            wf.cell(row=r, column=3, value=pol.vm_size_vcore)
+            if pol.max_per_machine is not None:
+                wf.cell(row=r, column=4, value=pol.max_per_machine)
+            if pol.co_residency == "exclusive":
+                wf.cell(row=r, column=5, value="獨佔")
+            elif pol.co_residency != "free":
+                wf.cell(row=r, column=5, value=pol.co_residency)
+            for i, month in enumerate(plan_input.months):
+                count = vm_counts.get((pol.pool, pol.product, month), 0)
+                if count and pol.vm_size_vcore is not None:
+                    wf.cell(row=r, column=6 + i, value=count * pol.vm_size_vcore)
+            r += 1
+
         # 一列示範 detail
-        example_month = plan_input.months[0] if plan_input.months else "2026-07"
         wf.cell(row=r, column=1, value="示範product(可刪)")
         wf.cell(row=r, column=2, value="network1")
         wf.cell(row=r, column=3, value=60)

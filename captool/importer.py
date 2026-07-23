@@ -167,10 +167,10 @@ def import_v2(path) -> PlanInput:
                     for col, month in demand_cols:
                         coord = f"{get_column_letter(col)}{row}"
                         vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                        months.add(month)
                         if vcore:
                             demands.append(DemandDelta(pool=pool, product=product,
                                                        month=month, vcore=vcore))
-                            months.add(month)
                 else:
                     # detail:每顆 VM 的 vcore 尺寸,顆數由 vcore ÷ size 反推
                     # Guard C (VM vcore):必須是正整數
@@ -188,9 +188,9 @@ def import_v2(path) -> PlanInput:
                     for col, month in demand_cols:
                         coord = f"{get_column_letter(col)}{row}"
                         vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                        months.add(month)
                         if not vcore:
                             continue
-                        months.add(month)
                         count = math.ceil(vcore / size)
                         if abs(vcore - count * size) > 1e-9:
                             issues.append(ImportIssue(
@@ -239,11 +239,11 @@ def import_v2(path) -> PlanInput:
                 for col, month in return_cols:
                     coord = f"{get_column_letter(col)}{row}"
                     cnt = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                    months.add(month)
                     if cnt:
                         returns.append(NodeReturn(pool=pool, product=product,
                                                   sku_name=sku_name, month=month,
                                                   count=int(cnt)))
-                        months.add(month)
                 row += 1
         else:
             # 舊 v2 格式(或 legacy):需求月份自 C(3),Return 月份自 N(14)

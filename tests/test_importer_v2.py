@@ -5,7 +5,8 @@ from openpyxl import Workbook, load_workbook
 
 from captool.exporter import generate_v2_template
 from captool.importer import import_any, import_legacy, import_v2
-from captool.models import NodeReturn, PlanInput, Pool, Sku, VmSpecDemand
+from captool.models import (NodeReturn, PlanInput, Pool, ProductPolicy, Sku,
+                            VmSpecDemand)
 from captool.planner import run_check
 from captool.solver.naive import NaiveSolver
 
@@ -160,8 +161,8 @@ def test_multi_sku_returns_roundtrip(tmp_path):
     assert pi2.return_by_sku(pool, "2026-07") == {"s1": 5, "s2": 7}
 
 
-def test_vm_demands_roundtrip(tmp_path):
-    """I-4: 新格式不產生 VM_Spec,但可手動新增以測試向後相容性。"""
+def test_detail_rows_roundtrip_through_template(tmp_path):
+    """generate_v2_template 必須自行重寫 VM-detail + policy 資料列(不靠手動補 VM_Spec)。"""
     skus = {"s1": Sku(name="s1", vcore_per_node=64, usable_ratio=0.8)}
     pool1 = Pool(fab="A", bm_group="network1")
     pool2 = Pool(fab="A", bm_group="network2")
@@ -174,19 +175,29 @@ def test_vm_demands_roundtrip(tmp_path):
             VmSpecDemand(pool=pool2, product="Product Y", month="2026-08",
                         vm_size_vcore=16, count=10),
         ],
-        moveins=[], returns=[], currents=[])
+        moveins=[], returns=[], currents=[],
+        policies=[
+            ProductPolicy(pool=pool1, product="Product X", vm_size_vcore=32,
+                         max_per_machine=2, co_residency="exclusive"),
+            ProductPolicy(pool=pool2, product="Product Y", vm_size_vcore=16,
+                         max_per_machine=None, co_residency="free"),
+        ])
     path = tmp_path / "v2.xlsx"
     generate_v2_template(pi, path)
-    # 新格式不產生 VM_Spec,需手動建立以測試向後相容性
-    wb = load_workbook(path)
-    ws = wb.create_sheet("VM_Spec")
-    ws.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"])
-    ws.append(["A", "network1", "Product X", "2026-07", 32, 4])
-    ws.append(["A", "network2", "Product Y", "2026-08", 16, 10])
-    wb.save(path)
+    assert "VM_Spec" not in load_workbook(path).sheetnames   # 無需獨立分頁
     pi2 = import_v2(path)
     assert pi2.vm_batch(pool1, "2026-07") == [(32, 4)]
     assert pi2.vm_batch(pool2, "2026-08") == [(16, 10)]
+    pol1 = pi2.policy_for(pool1, "Product X")
+    assert pol1 is not None
+    assert pol1.vm_size_vcore == 32
+    assert pol1.max_per_machine == 2
+    assert pol1.co_residency == "exclusive"
+    pol2 = pi2.policy_for(pool2, "Product Y")
+    assert pol2 is not None
+    assert pol2.vm_size_vcore == 16
+    assert pol2.max_per_machine is None
+    assert pol2.co_residency == "free"
 
 
 def test_detail_bad_vm_size_reported_not_raised(tmp_path):
@@ -207,3 +218,26 @@ def test_detail_bad_vm_size_reported_not_raised(tmp_path):
     # 該列已被跳過,不應產生 vm_demands 或 policy
     assert not any(d.product == "bad" for d in pi.vm_demands)
     assert not any(p.product == "bad" for p in pi.policies)
+
+
+def test_new_format_allzero_month_kept(tmp_path):
+    """新格式月份欄若整欄皆為空白/0,仍應保留在 pi.months(不可被 vcore 判斷排除)。"""
+    path = tmp_path / "new_v2.xlsx"
+    wb = Workbook()
+    wb.remove(wb.active)
+    a = wb.create_sheet("A")
+    a["A4"], a["B4"] = "Product", "BM Group"
+    a["C4"], a["D4"], a["E4"] = "VM vcore", "每台上限", "共居"
+    a["F4"], a["G4"] = "2026-07", "2026-08"    # 2026-08 整欄空白
+    a["A5"], a["B5"] = "svc", "network1"
+    a["F5"] = 100
+    a.cell(row=4, column=20, value="Product")
+    a.cell(row=4, column=21, value="BM Group")
+    a.cell(row=4, column=22, value="機型")
+    hs = wb.create_sheet("HW_SKU"); hs.append(["name", "vcore_per_node", "usable_ratio"]); hs.append(["std-64", 64, 0.8])
+    hc = wb.create_sheet("HW_Current"); hc.append(["fab", "bm_group", "sku", "count"]); hc.append(["A", "network1", "std-64", 5])
+    hm = wb.create_sheet("HW_MoveIn"); hm.append(["fab", "bm_group", "sku", "month", "count"])
+    wb.save(path)
+    pi = import_v2(path)
+    assert "2026-08" in pi.months
+    assert pi.demand_vcore(Pool(fab="A", bm_group="network1"), "2026-08") == 0
