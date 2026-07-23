@@ -73,6 +73,15 @@ class ImportIssue:
     message: str
 
 
+@dataclass(frozen=True)
+class ProductPolicy:
+    pool: Pool
+    product: str
+    vm_size_vcore: int | None      # None = 粗粒度(液體)
+    max_per_machine: int | None    # 1:X 的 X;None = 不限
+    co_residency: str              # "free" | "exclusive" | 群組名
+
+
 @dataclass
 class PlanInput:
     skus: dict[str, Sku]
@@ -84,6 +93,7 @@ class PlanInput:
     returns: list[NodeReturn]
     currents: list[CurrentStock]
     issues: list[ImportIssue] = field(default_factory=list)
+    policies: list[ProductPolicy] = field(default_factory=list)
 
     def demand_vcore(self, pool: Pool, month: str) -> float:
         return sum(d.vcore for d in self.demands if d.pool == pool and d.month == month)
@@ -115,3 +125,9 @@ class PlanInput:
             if c.pool == pool:
                 agg[c.sku_name] += c.count
         return dict(agg)
+
+    def policy_for(self, pool: Pool, product: str) -> "ProductPolicy | None":
+        for p in self.policies:
+            if p.pool == pool and p.product == product:
+                return p
+        return None

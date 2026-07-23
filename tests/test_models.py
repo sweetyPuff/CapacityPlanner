@@ -47,3 +47,21 @@ def test_lookups():
     assert pi.movein_by_sku(P, "2026-07") == {}
     assert pi.return_by_sku(P, "2026-08") == {"default-64": 12}
     assert pi.current_by_sku(P) == {"default-64": 50}
+
+
+def test_product_policy_and_lookup():
+    from captool.models import ProductPolicy
+    pol = ProductPolicy(pool=P, product="AI", vm_size_vcore=60,
+                        max_per_machine=1, co_residency="exclusive")
+    pi = PlanInput(
+        skus={SKU.name: SKU}, months=["2026-07"], pools=[P],
+        demands=[], vm_demands=[], moveins=[], returns=[], currents=[],
+        policies=[pol])
+    assert pi.policy_for(P, "AI") is pol
+    assert pi.policy_for(P, "nope") is None
+
+
+def test_plan_input_policies_default_empty():
+    pi = PlanInput(skus={}, months=[], pools=[], demands=[], vm_demands=[],
+                   moveins=[], returns=[], currents=[])
+    assert pi.policies == []
