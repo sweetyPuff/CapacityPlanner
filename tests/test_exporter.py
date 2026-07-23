@@ -44,15 +44,21 @@ def test_generate_v2_template(tmp_path):
     out = tmp_path / "template_v2.xlsx"
     generate_v2_template(pi, out)
     wb = load_workbook(out)
-    for sheet in ("HW_SKU", "HW_Current", "HW_MoveIn", "VM_Spec", "README", "A", "B", "C"):
+    for sheet in ("HW_SKU", "HW_Current", "HW_MoveIn", "README", "A", "B", "C"):
         assert sheet in wb.sheetnames, sheet
-    ws = wb["HW_SKU"]
-    assert [c.value for c in ws[1]] == ["name", "vcore_per_node", "usable_ratio"]
-    assert ws["A2"].value == "default-64"
-    # 廠區 tab Return 區含機型欄
+    assert "VM_Spec" not in wb.sheetnames          # 新格式移除獨立分頁
     wa = wb["A"]
-    assert wa["M4"].value == "機型"
-    assert wa["M5"].value == "default-64"
-    # v2 範本可被 detect_format 認出
+    assert [wa.cell(row=4, column=c).value for c in range(1, 6)] == \
+        ["Product", "BM Group", "VM vcore", "每台上限", "共居"]
+    assert wa.cell(row=4, column=6).value == "2026-07"   # 月份自 F
+    assert wa.cell(row=4, column=20).value == "Product"  # 退回區 Product 於 T
+    assert wa.cell(row=4, column=22).value == "機型"
+    # 示範 detail 列存在
+    found = False
+    for r in range(5, wa.max_row + 1):
+        if wa.cell(row=r, column=1).value and "示範" in str(wa.cell(row=r, column=1).value):
+            assert wa.cell(row=r, column=3).value == 60     # VM vcore
+            found = True
+    assert found
     from captool.importer import detect_format
     assert detect_format(out) == "v2"

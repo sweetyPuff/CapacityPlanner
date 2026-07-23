@@ -62,21 +62,23 @@ def export_summary(plan_input: PlanInput, plan_result: PlanResult, path) -> None
 
 
 def generate_v2_template(plan_input: PlanInput, path) -> None:
-    default_sku_name = next(iter(plan_input.skus))
     wb = Workbook()
 
-    # README(第一個 sheet)
     ws = wb.active
     ws.title = "README"
     lines = [
-        "容量規劃 v2 範本填表說明",
+        "容量規劃 v2 範本填表說明(新版面)",
         "",
-        "各廠區 tab:PM 維護需求區(C 欄起,每月新增 vcore);Return 區(K 欄起)含機型欄。",
-        "HW_SKU:機型目錄(平台/硬體 team 維護)。",
-        "HW_Current:各 pool 期初完全空置機台數(per 機型)。",
-        "HW_MoveIn:進機計畫(硬體 team 維護),月份格式 YYYY-MM。",
-        "VM_Spec:需要 VM 規格明細的 product 才填(size 為單顆 vcore 數)。",
-        "注意:機型名稱必須存在於 HW_SKU;月份一律 YYYY-MM。",
+        "各廠區 tab —— 需求區(A 欄起):",
+        "  A=Product, B=BM Group, C=VM vcore, D=每台上限, E=共居, F 欄起為各月 vcore。",
+        "  C(VM vcore)空 = 粗粒度需求(整包 vcore);有值 = 每顆 VM 的 vcore 尺寸。",
+        "  D(每台上限)= 一台實體機最多住幾顆該 VM(1:X 的 X,亦即爆炸半徑上限);空=不限。",
+        "  E(共居)= 空(自由,可與其他自由 product 混) / 獨佔 / 群組名(同名才可共用)。",
+        "  每月一律填 vcore;detail product 的顆數由 vcore ÷ VM vcore 反推(非整數倍會進位並提示)。",
+        "  同 product 若配置改變,請拆成兩列(如 A-1:1、A-1:2)。",
+        "退回區(T 欄起):T=Product, U=BM Group, V=機型, W 欄起為各月退回台數。",
+        "HW_SKU / HW_Current / HW_MoveIn:機型目錄 / 期初庫存 / 進機計畫(硬體 team 維護)。",
+        "注意:機型名稱須存在於 HW_SKU;月份一律 YYYY-MM;示範列(product 含『示範』)請刪除。",
     ]
     for line in lines:
         ws.append([line])
@@ -85,18 +87,19 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
             cell.font = _ARIAL
     ws["A1"].font = _BOLD
 
-    # 廠區 tabs
     fabs = sorted({p.fab for p in plan_input.pools})
     for fab in fabs:
         wf = wb.create_sheet(fab)
-        wf["C3"] = "User Demand (vcore)"
-        wf["M3"] = "Server Return"
         wf["A4"], wf["B4"] = "Product", "BM Group"
-        wf["K4"], wf["L4"], wf["M4"] = "Product", "BM Group", "機型"
+        wf["C4"], wf["D4"], wf["E4"] = "VM vcore", "每台上限", "共居"
+        wf.cell(row=4, column=20, value="Product")
+        wf.cell(row=4, column=21, value="BM Group")
+        wf.cell(row=4, column=22, value="機型")
         for i, month in enumerate(plan_input.months):
-            wf.cell(row=4, column=3 + i, value=month)       # 需求月份 C4 起
-            wf.cell(row=4, column=14 + i, value=month)      # Return 月份 N4 起
-        # 帶入既有需求
+            wf.cell(row=4, column=6 + i, value=month)     # 需求月份 F 起
+            wf.cell(row=4, column=23 + i, value=month)    # 退回月份 W 起
+
+        # 帶入既有需求(粗粒度)
         fab_demands = [d for d in plan_input.demands if d.pool.fab == fab]
         rows: dict[tuple[str, str], int] = {}
         r = 5
@@ -107,9 +110,20 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
                 wf.cell(row=r, column=1, value=d.product)
                 wf.cell(row=r, column=2, value=d.pool.bm_group)
                 r += 1
-            col = 3 + plan_input.months.index(d.month)
-            wf.cell(row=rows[key], column=col, value=d.vcore)
-        # 帶入既有 Return(機型填 default)
+            wf.cell(row=rows[key], column=6 + plan_input.months.index(d.month),
+                    value=d.vcore)
+        # 一列示範 detail
+        example_month = plan_input.months[0] if plan_input.months else "2026-07"
+        wf.cell(row=r, column=1, value="示範product(可刪)")
+        wf.cell(row=r, column=2, value="network1")
+        wf.cell(row=r, column=3, value=60)
+        wf.cell(row=r, column=4, value=1)
+        wf.cell(row=r, column=5, value="teamA")
+        wf.cell(row=r, column=6, value=120)
+        for c in range(1, 7):
+            wf.cell(row=r, column=c).fill = _YELLOW
+
+        # 帶入既有 return(機型填 default)
         fab_returns = [x for x in plan_input.returns if x.pool.fab == fab]
         rrows: dict[tuple[str, str, str], int] = {}
         r = 5
@@ -117,46 +131,35 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
             key = (x.product, x.pool.bm_group, x.sku_name)
             if key not in rrows:
                 rrows[key] = r
-                wf.cell(row=r, column=11, value=x.product)
-                wf.cell(row=r, column=12, value=x.pool.bm_group)
-                wf.cell(row=r, column=13, value=x.sku_name)
+                wf.cell(row=r, column=20, value=x.product)
+                wf.cell(row=r, column=21, value=x.pool.bm_group)
+                wf.cell(row=r, column=22, value=x.sku_name)
                 r += 1
-            col = 14 + plan_input.months.index(x.month)
-            wf.cell(row=rrows[key], column=col, value=x.count)
+            wf.cell(row=rrows[key], column=23 + plan_input.months.index(x.month),
+                    value=x.count)
+
         for row in wf.iter_rows():
             for cell in row:
-                cell.font = _ARIAL
-        wf["C3"].font = _BOLD
-        wf["M3"].font = _BOLD
+                if cell.font is not _BOLD:
+                    cell.font = _ARIAL
+        for c in range(1, 6):
+            wf.cell(row=4, column=c).font = _BOLD
+        for c in (20, 21, 22):
+            wf.cell(row=4, column=c).font = _BOLD
 
-    # HW_SKU
     ws1 = wb.create_sheet("HW_SKU")
     ws1.append(["name", "vcore_per_node", "usable_ratio"])
     for sku in plan_input.skus.values():
         ws1.append([sku.name, sku.vcore_per_node, sku.usable_ratio])
-    # HW_Current
     ws2 = wb.create_sheet("HW_Current")
     ws2.append(["fab", "bm_group", "sku", "count"])
     for c in plan_input.currents:
         ws2.append([c.pool.fab, c.pool.bm_group, c.sku_name, c.count])
-    # HW_MoveIn
     ws3 = wb.create_sheet("HW_MoveIn")
     ws3.append(["fab", "bm_group", "sku", "month", "count"])
     for m in plan_input.moveins:
         ws3.append([m.pool.fab, m.pool.bm_group, m.sku_name, m.month, m.count])
-    # VM_Spec(含示範列)
-    ws4 = wb.create_sheet("VM_Spec")
-    ws4.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"])
-    example_fab = fabs[0] if fabs else "A"
-    example_month = plan_input.months[0] if plan_input.months else "2026-07"
-    ws4.append([example_fab, "network1", "(示範列,請刪除後填入實際資料)",
-                example_month, 32, 2])
-    for cell in ws4[2]:
-        cell.fill = _YELLOW
-    for v in plan_input.vm_demands:
-        ws4.append([v.pool.fab, v.pool.bm_group, v.product, v.month,
-                    v.vm_size_vcore, v.count])
-    for sheet in (ws1, ws2, ws3, ws4):
+    for sheet in (ws1, ws2, ws3):
         for row in sheet.iter_rows():
             for cell in row:
                 cell.font = _ARIAL

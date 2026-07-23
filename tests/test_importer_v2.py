@@ -42,8 +42,9 @@ def test_multi_sku_and_vm_spec(tmp_path):
     wb["HW_SKU"].append(["big-128", 128, 0.8])
     wb["HW_Current"].append(["A", "network1", "big-128", 3])
     wb["HW_MoveIn"].append(["A", "network1", "big-128", "2026-09", 5])
-    ws = wb["VM_Spec"]
-    ws.delete_rows(2)  # 移除示範列
+    # 新格式不產生 VM_Spec,需手動建立以測試向後相容性
+    ws = wb.create_sheet("VM_Spec")
+    ws.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"])
     ws.append(["A", "network1", "Product Apple", "2026-08", 32, 4])
     wb.save(path)
     pi = import_v2(path)
@@ -70,8 +71,9 @@ def test_vm_spec_only_pool_is_planned(tmp_path):
     """I-1: 只出現在 VM_Spec 的 pool 也必須進入 pi.pools 並被排入推演。"""
     path = _v2_file(tmp_path)
     wb = load_workbook(path)
-    ws = wb["VM_Spec"]
-    ws.delete_rows(2)  # 移除示範列
+    # 新格式不產生 VM_Spec,需手動建立以測試向後相容性
+    ws = wb.create_sheet("VM_Spec")
+    ws.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"])
     new_pool = Pool(fab="A", bm_group="network9")
     ws.append(["A", "network9", "Product Only-In-VmSpec", "2026-07", 32, 4])
     wb.save(path)
@@ -116,7 +118,7 @@ def test_multi_sku_returns_roundtrip(tmp_path):
 
 
 def test_vm_demands_roundtrip(tmp_path):
-    """I-4: generate_v2_template 應寫出 plan_input.vm_demands,而非僅示範列。"""
+    """I-4: 新格式不產生 VM_Spec,但可手動新增以測試向後相容性。"""
     skus = {"s1": Sku(name="s1", vcore_per_node=64, usable_ratio=0.8)}
     pool1 = Pool(fab="A", bm_group="network1")
     pool2 = Pool(fab="A", bm_group="network2")
@@ -132,6 +134,13 @@ def test_vm_demands_roundtrip(tmp_path):
         moveins=[], returns=[], currents=[])
     path = tmp_path / "v2.xlsx"
     generate_v2_template(pi, path)
+    # 新格式不產生 VM_Spec,需手動建立以測試向後相容性
+    wb = load_workbook(path)
+    ws = wb.create_sheet("VM_Spec")
+    ws.append(["fab", "bm_group", "product", "month", "vm_size_vcore", "count"])
+    ws.append(["A", "network1", "Product X", "2026-07", 32, 4])
+    ws.append(["A", "network2", "Product Y", "2026-08", 16, 10])
+    wb.save(path)
     pi2 = import_v2(path)
     assert pi2.vm_batch(pool1, "2026-07") == [(32, 4)]
     assert pi2.vm_batch(pool2, "2026-08") == [(16, 10)]

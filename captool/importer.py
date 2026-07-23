@@ -8,8 +8,9 @@ from captool.months import parse_month
 
 DEFAULT_SKU = Sku(name="default-64", vcore_per_node=64, usable_ratio=0.8)
 
-V2_SHEETS = {"HW_SKU", "HW_Current", "HW_MoveIn", "VM_Spec"}
-NON_FAB_SHEETS = V2_SHEETS | {"summary", "README"}
+V2_SHEETS = {"HW_SKU", "HW_Current", "HW_MoveIn"}
+V2_OPTIONAL_SHEETS = {"VM_Spec"}
+NON_FAB_SHEETS = V2_SHEETS | V2_OPTIONAL_SHEETS | {"summary", "README"}
 
 
 class CapacityImportError(Exception):
@@ -113,71 +114,123 @@ def import_v2(path) -> PlanInput:
         count = int(_numeric(rec["count"], issues, "HW_MoveIn", f"E{rec['_row']}"))
         moveins.append(MoveIn(pool=pool, sku_name=sku_name, month=month, count=count))
 
-    # VM_Spec
+    # VM_Spec (optional in new v2 format)
     vm_demands: list[VmSpecDemand] = []
-    for rec in _read_table(wb_v["VM_Spec"],
-                           ["fab", "bm_group", "product", "month",
-                            "vm_size_vcore", "count"], issues, "VM_Spec"):
-        product = str(rec["product"])
-        if "示範列" in product:
-            continue
-        month = parser.parse(rec["month"], "VM_Spec", f"D{rec['_row']}")
-        if month is None:
-            continue
-        months.add(month)
-        pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
-        vm_size_vcore = int(_numeric(rec["vm_size_vcore"], issues, "VM_Spec", f"E{rec['_row']}"))
-        count = int(_numeric(rec["count"], issues, "VM_Spec", f"F{rec['_row']}"))
-        vm_demands.append(VmSpecDemand(
-            pool=pool, product=product, month=month,
-            vm_size_vcore=vm_size_vcore, count=count))
+    if "VM_Spec" in wb_v.sheetnames:
+        for rec in _read_table(wb_v["VM_Spec"],
+                               ["fab", "bm_group", "product", "month",
+                                "vm_size_vcore", "count"], issues, "VM_Spec"):
+            product = str(rec["product"])
+            if "示範" in product:
+                continue
+            month = parser.parse(rec["month"], "VM_Spec", f"D{rec['_row']}")
+            if month is None:
+                continue
+            months.add(month)
+            pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
+            vm_size_vcore = int(_numeric(rec["vm_size_vcore"], issues, "VM_Spec", f"E{rec['_row']}"))
+            count = int(_numeric(rec["count"], issues, "VM_Spec", f"F{rec['_row']}"))
+            vm_demands.append(VmSpecDemand(
+                pool=pool, product=product, month=month,
+                vm_size_vcore=vm_size_vcore, count=count))
 
-    # 廠區 tabs:需求區同 legacy;Return 區 K/L/M + 月份自 N(14)
+    # 廠區 tabs:需求區新 v2 格式 (A/B/C/D/E + F+) 或舊格式 (A/B + C+)
     demands: list[DemandDelta] = []
     returns: list[NodeReturn] = []
     fab_sheets = [n for n in wb_v.sheetnames if n not in NON_FAB_SHEETS]
     for name in fab_sheets:
         ws = wb_v[name]
-        demand_cols = _month_columns(ws, 4, 3, parser, name)
-        row = 5
-        while ws.cell(row=row, column=1).value is not None:
-            product = str(ws.cell(row=row, column=1).value)
-            group = str(ws.cell(row=row, column=2).value)
-            pool = Pool(fab=name, bm_group=group)
-            for col, month in demand_cols:
-                coord = f"{get_column_letter(col)}{row}"
-                vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
-                if vcore:
-                    demands.append(DemandDelta(pool=pool, product=product,
-                                               month=month, vcore=vcore))
-                months.add(month)
-            row += 1
-        return_cols = _month_columns(ws, 4, 14, parser, name)
-        row = 5
-        while ws.cell(row=row, column=11).value is not None:
-            product = str(ws.cell(row=row, column=11).value)
-            group = str(ws.cell(row=row, column=12).value)
-            raw_sku = ws.cell(row=row, column=13).value
-            if raw_sku is None:
-                issues.append(ImportIssue(
-                    "warning", name, f"M{row}",
-                    f"M{row} Return 機型空白,以 {first_sku_name} 計"))
-                sku_name = first_sku_name
-            else:
-                sku_name = valid_sku(raw_sku, name, row)
-                if sku_name is None:
+        # 判斷格式:檢查 C4 是否為 "VM vcore"(新格式) 或月份(舊格式)
+        c4_value = ws.cell(row=4, column=3).value
+        is_new_format = c4_value == "VM vcore"
+
+        if is_new_format:
+            # 新 v2 格式:需求月份自 F(6),Return 月份自 W(23)
+            demand_cols = _month_columns(ws, 4, 6, parser, name)
+            row = 5
+            while ws.cell(row=row, column=1).value is not None:
+                product = str(ws.cell(row=row, column=1).value)
+                if "示範" in product:
                     row += 1
                     continue
-            pool = Pool(fab=name, bm_group=group)
-            for col, month in return_cols:
-                coord = f"{get_column_letter(col)}{row}"
-                cnt = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
-                if cnt:
-                    returns.append(NodeReturn(pool=pool, product=product,
-                                              sku_name=sku_name, month=month,
-                                              count=int(cnt)))
-                months.add(month)
-            row += 1
+                group = str(ws.cell(row=row, column=2).value)
+                pool = Pool(fab=name, bm_group=group)
+                for col, month in demand_cols:
+                    coord = f"{get_column_letter(col)}{row}"
+                    vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                    if vcore:
+                        demands.append(DemandDelta(pool=pool, product=product,
+                                                   month=month, vcore=vcore))
+                        months.add(month)
+                row += 1
+            return_cols = _month_columns(ws, 4, 23, parser, name)
+            row = 5
+            while ws.cell(row=row, column=20).value is not None:
+                product = str(ws.cell(row=row, column=20).value)
+                group = str(ws.cell(row=row, column=21).value)
+                raw_sku = ws.cell(row=row, column=22).value
+                if raw_sku is None:
+                    issues.append(ImportIssue(
+                        "warning", name, f"V{row}",
+                        f"V{row} Return 機型空白,以 {first_sku_name} 計"))
+                    sku_name = first_sku_name
+                else:
+                    sku_name = valid_sku(raw_sku, name, row)
+                    if sku_name is None:
+                        row += 1
+                        continue
+                pool = Pool(fab=name, bm_group=group)
+                for col, month in return_cols:
+                    coord = f"{get_column_letter(col)}{row}"
+                    cnt = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                    if cnt:
+                        returns.append(NodeReturn(pool=pool, product=product,
+                                                  sku_name=sku_name, month=month,
+                                                  count=int(cnt)))
+                        months.add(month)
+                row += 1
+        else:
+            # 舊 v2 格式(或 legacy):需求月份自 C(3),Return 月份自 N(14)
+            demand_cols = _month_columns(ws, 4, 3, parser, name)
+            row = 5
+            while ws.cell(row=row, column=1).value is not None:
+                product = str(ws.cell(row=row, column=1).value)
+                group = str(ws.cell(row=row, column=2).value)
+                pool = Pool(fab=name, bm_group=group)
+                for col, month in demand_cols:
+                    coord = f"{get_column_letter(col)}{row}"
+                    vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                    if vcore:
+                        demands.append(DemandDelta(pool=pool, product=product,
+                                                   month=month, vcore=vcore))
+                    months.add(month)
+                row += 1
+            return_cols = _month_columns(ws, 4, 14, parser, name)
+            row = 5
+            while ws.cell(row=row, column=11).value is not None:
+                product = str(ws.cell(row=row, column=11).value)
+                group = str(ws.cell(row=row, column=12).value)
+                raw_sku = ws.cell(row=row, column=13).value
+                if raw_sku is None:
+                    issues.append(ImportIssue(
+                        "warning", name, f"M{row}",
+                        f"M{row} Return 機型空白,以 {first_sku_name} 計"))
+                    sku_name = first_sku_name
+                else:
+                    sku_name = valid_sku(raw_sku, name, row)
+                    if sku_name is None:
+                        row += 1
+                        continue
+                pool = Pool(fab=name, bm_group=group)
+                for col, month in return_cols:
+                    coord = f"{get_column_letter(col)}{row}"
+                    cnt = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
+                    if cnt:
+                        returns.append(NodeReturn(pool=pool, product=product,
+                                                  sku_name=sku_name, month=month,
+                                                  count=int(cnt)))
+                    months.add(month)
+                row += 1
 
     pools = sorted({c.pool for c in currents}
                    | {d.pool for d in demands}
