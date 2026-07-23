@@ -173,7 +173,18 @@ def import_v2(path) -> PlanInput:
                             months.add(month)
                 else:
                     # detail:每顆 VM 的 vcore 尺寸,顆數由 vcore ÷ size 反推
-                    size = int(vm_size)
+                    # Guard C (VM vcore):必須是正整數
+                    try:
+                        size = int(vm_size)
+                        if size <= 0:
+                            raise ValueError("非正整數")
+                    except (TypeError, ValueError):
+                        issues.append(ImportIssue(
+                            "error", name, f"C{row}",
+                            f"C{row} 產品 {product} 的 VM vcore '{vm_size}' 非正整數,該列已跳過"))
+                        row += 1
+                        continue
+
                     for col, month in demand_cols:
                         coord = f"{get_column_letter(col)}{row}"
                         vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
@@ -181,7 +192,7 @@ def import_v2(path) -> PlanInput:
                             continue
                         months.add(month)
                         count = math.ceil(vcore / size)
-                        if vcore % size != 0:
+                        if abs(vcore - count * size) > 1e-9:
                             issues.append(ImportIssue(
                                 "warning", name, coord,
                                 f"{coord} 產品 {product} 的 vcore {vcore} 非 VM 規格 {size} "
@@ -189,9 +200,23 @@ def import_v2(path) -> PlanInput:
                         vm_demands.append(VmSpecDemand(pool=pool, product=product,
                                                        month=month, vm_size_vcore=size,
                                                        count=count))
+
+                    # Guard D (每台上限):非正整數時以 None 計
+                    max_per_machine = None
+                    if max_per not in (None, ""):
+                        try:
+                            max_per_val = int(max_per)
+                            if max_per_val <= 0:
+                                raise ValueError("非正整數")
+                            max_per_machine = max_per_val
+                        except (TypeError, ValueError):
+                            issues.append(ImportIssue(
+                                "warning", name, f"D{row}",
+                                f"D{row} 每台上限 '{max_per}' 非正整數,以不限計"))
+
                     policies.append(ProductPolicy(
                         pool=pool, product=product, vm_size_vcore=size,
-                        max_per_machine=int(max_per) if max_per not in (None, "") else None,
+                        max_per_machine=max_per_machine,
                         co_residency=_parse_coresidency(coresid_raw)))
                 row += 1
             return_cols = _month_columns(ws, 4, 23, parser, name)
@@ -267,7 +292,8 @@ def import_v2(path) -> PlanInput:
                    | {d.pool for d in demands}
                    | {m.pool for m in moveins}
                    | {v.pool for v in vm_demands}
-                   | {r.pool for r in returns},
+                   | {r.pool for r in returns}
+                   | {p.pool for p in policies},
                    key=lambda p: (p.fab, p.bm_group))
     return PlanInput(skus=skus, months=sorted(months), pools=pools,
                      demands=demands, vm_demands=vm_demands,

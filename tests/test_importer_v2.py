@@ -187,3 +187,23 @@ def test_vm_demands_roundtrip(tmp_path):
     pi2 = import_v2(path)
     assert pi2.vm_batch(pool1, "2026-07") == [(32, 4)]
     assert pi2.vm_batch(pool2, "2026-08") == [(16, 10)]
+
+
+def test_detail_bad_vm_size_reported_not_raised(tmp_path):
+    """Guard C (VM vcore):非正整數時應回報錯誤並跳過該列,而非整個 raise 中斷匯入。"""
+    path = _v2_file(tmp_path)
+    wb = load_workbook(path)
+    wa = wb["A"]
+    r = wa.max_row + 1
+    wa.cell(row=r, column=1, value="bad")           # product
+    wa.cell(row=r, column=2, value="network1")      # group
+    wa.cell(row=r, column=3, value="abc")           # C: non-numeric VM vcore
+    wa.cell(row=r, column=4, value=2)               # D: max_per
+    wa.cell(row=r, column=6, value=100)             # F: some month vcore
+    wb.save(path)
+    pi = import_v2(path)  # 不應 raise
+    errors = [i for i in pi.issues if i.severity == "error" and i.sheet == "A"]
+    assert any("VM vcore" in i.message and "非正整數" in i.message for i in errors)
+    # 該列已被跳過,不應產生 vm_demands 或 policy
+    assert not any(d.product == "bad" for d in pi.vm_demands)
+    assert not any(p.product == "bad" for p in pi.policies)
