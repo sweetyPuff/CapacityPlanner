@@ -26,9 +26,25 @@ WORKER = [
     ("B", "batch", "network1", {"2026-07": 300, "2026-08": 300, "2026-09": 300}),
     ("C", "api", "network2", {"2026-07": 150, "2026-09": 150}),
 ]
-CURRENT = [("A", "network1", "std-64", 6), ("A", "network1", "big-128", 3),
-           ("B", "network1", "std-64", 10), ("C", "network2", "std-64", 5)]
+# HW_Current 帶 AG(最後一欄):(fab, bm_group, sku, count, ag)
+# A/network1、C/network2 需 ≥5 個 AG(菜單 master×5 要能分散);在庫分佈在部分 AG。
+CURRENT = [
+    ("A", "network1", "std-64", 2, "ag1"), ("A", "network1", "std-64", 2, "ag2"),
+    ("A", "network1", "std-64", 2, "ag3"),
+    ("A", "network1", "big-128", 1, "ag1"), ("A", "network1", "big-128", 1, "ag2"),
+    ("A", "network1", "big-128", 1, "ag3"),
+    ("B", "network1", "std-64", 4, "ag1"), ("B", "network1", "std-64", 3, "ag2"),
+    ("B", "network1", "std-64", 3, "ag3"),
+    ("C", "network2", "std-64", 2, "ag1"), ("C", "network2", "std-64", 2, "ag2"),
+    ("C", "network2", "std-64", 1, "ag3"),
+]
 MOVEIN = [("B", "network1", "big-128", "2026-08", 2)]
+# HW_Caps:每 AG 槽位上限 (fab, network, ag, max_bm)
+CAPS = (
+    [("A", "network1", f"ag{i}", 20) for i in range(1, 6)]    # 5 個 AG
+    + [("B", "network1", f"ag{i}", 20) for i in range(1, 4)]  # 3 個 AG
+    + [("C", "network2", f"ag{i}", 20) for i in range(1, 6)]  # 5 個 AG
+)
 
 # 角色 vcore 佔位假值(待實際規格取代)
 ROLE_VCORE = {"master": 16, "infra": 8, "l4lb": 8, "learner": 32,
@@ -87,13 +103,17 @@ def build(path):
     for s in SKUS:
         hs.append(list(s))
     hc = wb.create_sheet("HW_Current")
-    hc.append(["fab", "bm_group", "sku", "count"])
+    hc.append(["fab", "bm_group", "sku", "count", "ag"])   # ag 最後一欄(向前相容)
     for row in CURRENT:
         hc.append(list(row))
     hm = wb.create_sheet("HW_MoveIn")
     hm.append(["fab", "bm_group", "sku", "month", "count"])
     for row in MOVEIN:
         hm.append(list(row))
+    hcap = wb.create_sheet("HW_Caps")
+    hcap.append(["fab", "network", "ag", "max_bm"])
+    for row in CAPS:
+        hcap.append(list(row))
 
     # Cluster_Menu:每菜單列出全部元件(底座 shared + 額外 exclusive)
     cm = wb.create_sheet("Cluster_Menu")
@@ -109,7 +129,7 @@ def build(path):
     for row in NEW_BUILD:
         nb.append(list(row))
 
-    for sheet in (hs, hc, hm, cm, nb):
+    for sheet in (hs, hc, hm, hcap, cm, nb):
         for cell in sheet[1]:
             cell.font = BOLD
     wb.save(path)

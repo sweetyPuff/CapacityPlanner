@@ -14,7 +14,7 @@ DEFAULT_SKU = Sku(name="default-64", vcore_per_node=64, usable_ratio=0.8)
 V2_SHEETS = {"HW_SKU", "HW_Current", "HW_MoveIn"}
 V2_OPTIONAL_SHEETS = {"VM_Spec"}
 NON_FAB_SHEETS = V2_SHEETS | V2_OPTIONAL_SHEETS | {
-    "summary", "README", "Cluster_Menu", "New_Build"}
+    "summary", "README", "Cluster_Menu", "New_Build", "HW_Caps"}
 
 
 class CapacityImportError(Exception):

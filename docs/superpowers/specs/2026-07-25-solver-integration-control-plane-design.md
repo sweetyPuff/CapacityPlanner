@@ -66,6 +66,17 @@
 
 worker 需求維持在 fab 頁需求列;new build 與 worker **分開標示**(決策甲)。
 
+### 拓撲 / AG(失效域)—— solver spread/HA 的必要輸入
+
+masters 一台一 AG 分散、失效域隔離、爆炸半徑,都靠 baremetal 的 **AG** 資訊。沒有 AG,solver
+只能回答「總容量夠不夠」,無法驗證「擺得安全」。決策:**失效域維度 = AG**;**在庫機器逐台帶 AG**(細粒度)。
+
+- **`HW_Current` 增一欄 `ag`(放在最後)** —— schema:`fab, bm_group, sku, count, ag`,即
+  「某 pool 某機型在某 AG 有幾台」。ag 放最後,現行 importer 讀前四欄自動忽略、整合階段再讀(向前相容)。
+- **`HW_Caps`(新表,AG 槽位上限)** —— 欄:`fab, network, ag, max_bm`,即每個 AG 還能放幾台(限制採購)。
+  控制 new build 可分散的 AG 數必須 ≥ 菜單最大角色台數(菜單 A master×5 → 該 fab×network 需 ≥5 個 AG)。
+- 買的新機器 solver 會給獨立虛擬 rack、可自由分到不同 AG(受 `HW_Caps` 上限);在庫機器用其實際 AG。
+
 ## 4. 與 solver 互動(重點章節)
 
 工具把 Excel 輸入翻譯成 solver develop 版的 request 模型,呼叫 `solve_capacity_horizon`,
@@ -85,8 +96,10 @@ worker 需求維持在 fab 頁需求列;new build 與 worker **分開標示**(�
 |---|---|---|
 | pool = fab × bm_group | fab(`fab_topology_dimension`)× **network**(BGP zone) | 我方 `bm_group`(network1/2)→ solver `network` |
 | SKU(機型) | `procurement_types`(BaremetalType: type_id, capacity, fab) | HW_SKU → 型錄 |
-| HW_Current(per pool per SKU 台數) | `in_stock`:一台一個 `Baremetal`(topology 帶 fab、`network`、capacity=型的 capacity) | |
+| HW_Current(per pool per SKU per **AG** 台數) | `in_stock`:一台一個 `Baremetal`(topology 帶 fab、**ag**、`network`、capacity) | ag 來自 HW_Current 的 ag 欄 |
+| HW_Caps(每 AG 槽位上限) | `procurement_caps`(per (bucket=AG, network) 的 max_bm) | 限制每 AG 可買台數 |
 | HW_MoveIn(進機,已定案) | `committed_stock`(近零成本層,帶 type_id/fab/network/bucket/count) | 已決定要進的機器 |
+| 失效域 = AG | `config.procurement_spread_dimension = "ag"` | masters 一台一 AG |
 | 月份 | `demand_book` 的 `period`;每 (fab, period) 一組 requirements | horizon 逐月 |
 | 單維 vcore | `Resources.cpu_cores`(其餘 mem/disk/gpu 先 0) | 維持單維(§v2 決策) |
 
