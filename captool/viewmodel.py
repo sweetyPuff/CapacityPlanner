@@ -69,6 +69,24 @@ def summary_frames(plan_result: PlanResult) -> "dict[str, pd.DataFrame]":
     return frames
 
 
+def prometheus_ag_placeholder() -> pd.DataFrame:
+    """未來 Prometheus 整合的欄位預覽(目前為假資料佔位)。
+
+    每 cluster × AG 的節點現況:已安裝節點數、cordon 節點數、以及該 AG 的節點總數
+    (未來由 Prometheus / node label 取得),供 expand / delete 時分配各 AG 的處理量。
+    """
+    rows = [
+        ("c1", "ag1", 8, 1, 20),
+        ("c1", "ag2", 7, 0, 20),
+        ("c1", "ag3", 6, 2, 18),
+        ("c2", "ag1", 5, 0, 20),
+        ("c2", "ag2", 5, 1, 20),
+        ("c2", "ag3", 4, 0, 18),
+    ]
+    return pd.DataFrame(rows, columns=[
+        "cluster", "AG", "已安裝節點數", "cordon 節點數", "AG 節點總數"])
+
+
 def placements_frame(plan_result: PlanResult, pool: Pool) -> pd.DataFrame:
     records = []
     for o in plan_result.for_pool(pool):

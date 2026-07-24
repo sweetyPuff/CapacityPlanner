@@ -176,6 +176,11 @@ AG(失效域)是 **worker 與 control plane 都需要**的資訊,不是 control-
   但 solver 的 `assignments` / `bought_bms` 已帶每台落點的 AG(買的機器 solver 會分到不同 AG 以滿足分散)。
   可把這個「建議 AG 配置」productize 成輸出,供硬體 team 進機時參考。**列為之後的功能**,非本次範圍。
 - worker 的細緻 AG 分散目標(指定跨 N 個 AG)以 `anti_affinity_rules` 表達 —— 需要時再開。
+- **Prometheus 整合(取得叢集實況)**:接 Prometheus 取得每 cluster 的 current installed node
+  count、cordon node count,並透過 node label 取各 AG 的節點總數。用途:expand / delete 時可依
+  各 AG 的現況(已裝 / cordon / 總量)安排每個 AG 要處理的數量,做均衡分配。
+  UI 已先在**總表**放欄位預覽(`cluster, AG, 已安裝節點數, cordon 節點數, AG 節點總數`,目前假資料),
+  待整合時把假資料換成 Prometheus 實際查詢。
 
 ## 8. 範圍與順序(建議)
 

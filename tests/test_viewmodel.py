@@ -6,7 +6,7 @@ from captool.planner import run_check
 from captool.solver.naive import NaiveSolver
 from captool.viewmodel import (apply_movein_edits, movein_frame,
                                overview_frame, placements_frame,
-                               summary_frames)
+                               prometheus_ag_placeholder, summary_frames)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_legacy.xlsx"
 B1 = Pool(fab="B", bm_group="network1")
@@ -66,6 +66,13 @@ def test_summary_frames_excel_compat_has_instock():
     frames = summary_frames(result)
     assert "in-stock(台)" in frames
     assert "月末剩餘可售 vcore" not in frames
+
+
+def test_prometheus_ag_placeholder_columns():
+    df = prometheus_ag_placeholder()
+    assert list(df.columns) == ["cluster", "AG", "已安裝節點數",
+                                "cordon 節點數", "AG 節點總數"]
+    assert len(df) > 0
 
 
 def test_apply_movein_edits_rejects_unknown_sku():

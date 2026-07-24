@@ -17,7 +17,7 @@ from captool.planner import run_check, run_suggest
 from captool.solver.naive import NaiveSolver
 from captool.viewmodel import (apply_movein_edits, movein_frame,
                                overview_frame, placements_frame,
-                               summary_frames)
+                               prometheus_ag_placeholder, summary_frames)
 
 st.set_page_config(page_title="容量規劃工具", layout="wide")
 
@@ -118,6 +118,12 @@ elif page == "總表":
             continue
         st.subheader(name)
         st.dataframe(df, use_container_width=True)
+
+    st.subheader("各 AG 節點現況(Prometheus,假資料)")
+    st.caption("未來功能:由 Prometheus 取得每 cluster 已安裝 / cordon 節點數、"
+               "各 AG 節點總數,供 expand / delete 時分配各 AG 的處理量。目前為假資料佔位。")
+    st.dataframe(prometheus_ag_placeholder(), use_container_width=True,
+                 hide_index=True)
 
     buf = io.BytesIO()
     export_summary(plan_input, result, buf)
