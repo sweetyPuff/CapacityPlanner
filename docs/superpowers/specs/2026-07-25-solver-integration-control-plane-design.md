@@ -68,8 +68,10 @@ worker 需求維持在 fab 頁需求列;new build 與 worker **分開標示**(�
 
 ### 拓撲 / AG(失效域)—— solver spread/HA 的必要輸入
 
-masters 一台一 AG 分散、失效域隔離、爆炸半徑,都靠 baremetal 的 **AG** 資訊。沒有 AG,solver
-只能回答「總容量夠不夠」,無法驗證「擺得安全」。決策:**失效域維度 = AG**;**在庫機器逐台帶 AG**(細粒度)。
+AG(失效域)是 **worker 與 control plane 都需要**的資訊,不是 control-plane 專屬:masters 一台一 AG
+分散、worker 也要跨 AG 分散(爆炸半徑 / 失效域隔離)。沒有 AG,solver 只能回答「總容量夠不夠」,
+無法驗證任何角色「擺得安全」。決策:**失效域維度 = AG**;**在庫機器(不分 worker / control plane)
+逐台帶 AG**(細粒度)。
 
 - **`HW_Current` 增一欄 `ag`(放在最後)** —— schema:`fab, bm_group, sku, count, ag`,即
   「某 pool 某機型在某 AG 有幾台」。ag 放最後,現行 importer 讀前四欄自動忽略、整合階段再讀(向前相容)。
@@ -109,6 +111,9 @@ masters 一台一 AG 分散、失效域隔離、爆炸半徑,都靠 baremetal �
   - `node_role=worker`、`total_resources={cpu_cores: 該月 vcore}`、`network=bm_group`、
     `cluster_id`=product(或 worker 所屬 cluster)、`vm_specs`=允許的 worker VM 規格(來自 v2 VM 明細/config)。
   - solver 用 **split-and-solve** 自動把 vcore 預算切成 worker VM 再擺放。
+  - **worker 也吃 AG 分散**:solver 的 `auto_generate_anti_affinity` 依 (cluster_id, ip_type, node_role)
+    分組,把該 worker 群的 VM 跨 AG 分散(不是 control plane 專屬);v2 的「每台上限」→ `max_per_bm`
+    控制單台密度 / 爆炸半徑。若某 worker 需要指定 AG 分散數,可另下 `anti_affinity_rules`(未來)。
 - **New build → 菜單展開** → 每角色一筆 `ResourceRequirement`:
   - `node_role`=master/infra/l4lb/learner/…、`cluster_id`=新 cluster(如 c2)、
     `vm_specs=[該角色 vcore 規格]`、`min_total_vms=max_total_vms=菜單台數`(鎖定台數)、`network`。
@@ -165,9 +170,16 @@ masters 一台一 AG 分散、失效域隔離、爆炸半徑,都靠 baremetal �
 4. **ortools 安裝**:我方環境要能裝 ortools + pydantic(in-process 路徑);或改走 HTTP。
 5. **worker VM 規格來源**:worker split 的 `vm_specs`(允許的 worker VM 尺寸)從哪來(config / v2 VM 明細)。
 
-## 7. 範圍與順序(建議)
+## 7. 未來功能(roadmap)
 
-1. 本輪:spec + 新 Excel sample(菜單假資料)+ importer 略過新表不報錯。(整合尚未接)
-2. 下一步:`models` 加 Menu/NewBuild → `importer`/`exporter` 解析/產生 → `horizon_adapter`
+- **建議新採購機器的 AG 設定值**:新買的機器規劃時不預先指定 AG(DC/rack team 進機時才排),
+  但 solver 的 `assignments` / `bought_bms` 已帶每台落點的 AG(買的機器 solver 會分到不同 AG 以滿足分散)。
+  可把這個「建議 AG 配置」productize 成輸出,供硬體 team 進機時參考。**列為之後的功能**,非本次範圍。
+- worker 的細緻 AG 分散目標(指定跨 N 個 AG)以 `anti_affinity_rules` 表達 —— 需要時再開。
+
+## 8. 範圍與順序(建議)
+
+1. 本輪:spec + 新 Excel sample(菜單 + AG/caps 假資料)+ importer 略過新表不報錯。(整合尚未接)
+2. 下一步:`models` 加 Menu/NewBuild/AG → `importer`/`exporter` 解析/產生 → `horizon_adapter`
    翻譯 + 假後端測 → 裝 ortools/接 in-process 實跑 → 總表改吃 CapacityReport。
 3. 與同事對 §6 的介面/co-tenancy/規格。
