@@ -32,6 +32,43 @@ def overview_frame(plan_result: PlanResult, pool: Pool) -> pd.DataFrame:
     return pd.DataFrame.from_dict(rows, orient="index")
 
 
+def _ordered(seq):
+    out = []
+    for x in seq:
+        if x not in out:
+            out.append(x)
+    return out
+
+
+def summary_frames(plan_result: PlanResult) -> "dict[str, pd.DataFrame]":
+    """跨 pool × 月份的總攬,仿 Excel summary 分頁:每個分類一張
+    (列=pool、欄=月份)的表。回傳有序 dict {分類名: DataFrame}。"""
+    pools = _ordered(o.pool for o in plan_result.outcomes)
+    months = _ordered(o.month for o in plan_result.outcomes)
+    by = {(o.pool, o.month): o for o in plan_result.outcomes}
+    labels = [p.label for p in pools]
+
+    def grid(fn):
+        data = {m: [fn(by[(p, m)]) if (p, m) in by else None for p in pools]
+                for m in months}
+        return pd.DataFrame(data, index=labels, columns=months)
+
+    frames: "dict[str, pd.DataFrame]" = {
+        "狀態": grid(lambda o: "OK" if o.feasible else "缺口"),
+        "需求 vcore": grid(lambda o: o.demand_vcore),
+        "新啟用機台": grid(lambda o: sum(o.machines_opened.values())),
+        "進機": grid(lambda o: sum(o.movein.values())),
+        "退回": grid(lambda o: sum(o.returns.values())),
+    }
+    if plan_result.mode == "excel_compat":
+        frames["in-stock(台)"] = grid(lambda o: round(o.stock_float, 2))
+    else:
+        frames["月末剩餘可售 vcore"] = grid(lambda o: round(o.free_vcore_total, 1))
+        frames["缺口 vcore"] = grid(
+            lambda o: round(o.shortfall_vcore, 1) if not o.feasible else 0.0)
+    return frames
+
+
 def placements_frame(plan_result: PlanResult, pool: Pool) -> pd.DataFrame:
     records = []
     for o in plan_result.for_pool(pool):

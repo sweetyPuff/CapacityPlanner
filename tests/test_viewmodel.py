@@ -5,7 +5,8 @@ from captool.models import Pool
 from captool.planner import run_check
 from captool.solver.naive import NaiveSolver
 from captool.viewmodel import (apply_movein_edits, movein_frame,
-                               overview_frame, placements_frame)
+                               overview_frame, placements_frame,
+                               summary_frames)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_legacy.xlsx"
 B1 = Pool(fab="B", bm_group="network1")
@@ -41,6 +42,30 @@ def test_movein_roundtrip():
                                  "2026-10") == {"default-64": 7}
     # 原物件不受影響
     assert pi.movein_by_sku(Pool(fab="A", bm_group="network1"), "2026-10") == {}
+
+
+def test_summary_frames_shape_and_status():
+    _, result = _result()
+    frames = summary_frames(result)
+    assert "狀態" in frames and "需求 vcore" in frames
+    status = frames["狀態"]
+    # 列 = 6 個 pool,欄 = 6 個月份
+    assert status.shape == (6, 6)
+    assert "B/network1" in status.index
+    assert list(status.columns) == ["2026-07", "2026-08", "2026-09",
+                                    "2026-10", "2026-11", "2026-12"]
+    # B/network1 期初 0 台 → 2026-07 缺口
+    assert status.loc["B/network1", "2026-07"] == "缺口"
+    # 需求 vcore 對得上 overview
+    assert frames["需求 vcore"].loc["A/network1", "2026-07"] == 870
+
+
+def test_summary_frames_excel_compat_has_instock():
+    pi = import_legacy(FIXTURE)
+    result = run_check(pi, NaiveSolver(), mode="excel_compat")
+    frames = summary_frames(result)
+    assert "in-stock(台)" in frames
+    assert "月末剩餘可售 vcore" not in frames
 
 
 def test_apply_movein_edits_rejects_unknown_sku():

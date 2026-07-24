@@ -16,7 +16,8 @@ from captool.models import ImportIssue, Pool
 from captool.planner import run_check, run_suggest
 from captool.solver.naive import NaiveSolver
 from captool.viewmodel import (apply_movein_edits, movein_frame,
-                               overview_frame, placements_frame)
+                               overview_frame, placements_frame,
+                               summary_frames)
 
 st.set_page_config(page_title="容量規劃工具", layout="wide")
 
@@ -52,7 +53,8 @@ with st.sidebar:
     if uploaded is not None and st.session_state.get("source_file_id") != uploaded.file_id:
         _load(uploaded)
     mode = st.radio("推演模式", list(MODE_LABELS), format_func=MODE_LABELS.get)
-    page = st.radio("頁面", ["匯入報告", "總覽", "驗證模式", "回推模式", "配置明細"])
+    page = st.radio("頁面", ["匯入報告", "總表", "總覽", "驗證模式", "回推模式",
+                            "配置明細"])
 
 if "fatal_issues" in st.session_state and "plan_input" not in st.session_state:
     st.error("匯入失敗:")
@@ -94,6 +96,32 @@ if page == "匯入報告":
             st.error(text)
         else:
             st.warning(text)
+
+elif page == "總表":
+    st.header("總表(所有 pool × 月份總攬)")
+    frames = summary_frames(result)
+    gaps = result.gap_months
+    if gaps:
+        st.error(f"共 {len(gaps)} 個缺口(pool×月),見下方紅底格。")
+    else:
+        st.success("所有 pool 各月皆可行。")
+
+    st.subheader("可行性總攬")
+    status = frames["狀態"]
+    st.dataframe(
+        status.style.map(
+            lambda v: "background-color: #ffc7ce" if v == "缺口" else ""),
+        use_container_width=True)
+
+    for name, df in frames.items():
+        if name == "狀態":
+            continue
+        st.subheader(name)
+        st.dataframe(df, use_container_width=True)
+
+    buf = io.BytesIO()
+    export_summary(plan_input, result, buf)
+    st.download_button("下載 summary Excel", buf.getvalue(), "summary.xlsx")
 
 elif page == "總覽":
     st.header("總覽")
