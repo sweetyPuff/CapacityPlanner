@@ -84,13 +84,17 @@ AG(失效域)是 **worker 與 control plane 都需要**的資訊,不是 control-
 工具把 Excel 輸入翻譯成 solver develop 版的 request 模型,呼叫 `solve_capacity_horizon`,
 再把 `CapacityReport` 映射回 UI/summary。以下為欄位級對應。
 
-### 4.1 呼叫方式
-- **優先 in-process**:`from app.capacity_planner import solve_capacity_horizon`(需 `solver-develop`
-  在 sys.path、且環境裝 `ortools` + `pydantic`)。
-- 或 **HTTP sidecar**:目前 README 只暴露 `/v1/placement/solve`、`/split-and-solve`;
-  capacity horizon 尚無 HTTP route → 需請同事加一個 `/v1/capacity/horizon` 端點,或走 in-process。
-  (待與同事確認 —— 見 §6。)
-- 沿用 adapter 的依賴注入精神:`solve_fn` 可切 in-process / HTTP / 測試假後端,工具本體不硬依賴 ortools。
+### 4.1 呼叫方式(✅ 已確認:走 HTTP)
+
+**solver develop 版已具備 HTTP API,含 capacity 端點**(2026-07-25 本地實測通過,server 起於 :50051):
+- `POST /v1/capacity/plan` → `CapacityReport`(= `solve_capacity_horizon`,多期,**我方主用**)
+- `POST /v1/capacity/procure` → `ProcurementResult`(= `solve_capacity_plan`,單期)
+- `POST /v1/placement/split-and-solve` → `SplitPlacementResult`;`GET /health` → `"ok"`
+
+**決定:走 HTTP** —— 我方工具**不需裝 ortools**,只組 `CapacityPlanRequest` JSON、POST 過去、
+解析 `CapacityReport`。以 `solve_fn`(HTTP client / 測試假後端)注入,sidecar URL 可設定。
+> 環境備註:solver 的 pyproject 標 requires-python≥3.13,但 3.12 直接裝依賴(ortools/fastapi/…)
+> + `python -m app.server --port <port>` 可跑;`-e .` 安裝會被 requires-python 擋。
 
 ### 4.2 單位對應(我方 → solver)
 
@@ -164,7 +168,8 @@ AG(失效域)是 **worker 與 control plane 都需要**的資訊,不是 control-
 
 ## 6. 待確認 / 待同事協調
 
-1. **capacity horizon 的呼叫介面**:in-process import 還是請同事加 HTTP 端點?(§4.1)
+1. ~~**capacity horizon 的呼叫介面**~~ ✅ **已解決**:solver 已有 `POST /v1/capacity/plan`
+   (回 CapacityReport)與 `/v1/capacity/procure`,本地實測通過 → 走 HTTP,我方不裝 ortools。(§4.1)
 2. **co-tenancy 表達**:control-plane tenant(角色群共住、與 worker 分離)在她的模型怎麼最乾淨地表達 —— candidate scoping / 專用 BM type / 是否需她補一個 co-residency 概念。(§4.4)
 3. **各角色 vcore 實際規格**(master/infra/l4lb/learner/F5/Bastion/HA/VT)—— 目前用假值。
 4. **ortools 安裝**:我方環境要能裝 ortools + pydantic(in-process 路徑);或改走 HTTP。
