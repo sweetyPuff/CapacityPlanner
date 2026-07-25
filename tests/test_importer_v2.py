@@ -90,6 +90,46 @@ def test_import_any_dispatches_new(tmp_path):
     assert import_any(path).months == import_v2(path).months
 
 
+def test_hw_current_ag_and_caps(tmp_path):
+    from openpyxl import Workbook
+    path = tmp_path / "ag.xlsx"
+    wb = Workbook()
+    wb.remove(wb.active)
+    a = wb.create_sheet("A")
+    a["A4"], a["B4"], a["C4"] = "Product", "BM Group", "VM vcore"
+    a["F4"] = "2026-07"
+    a["A5"], a["B5"], a["F5"] = "web", "network1", 100
+    hs = wb.create_sheet("HW_SKU")
+    hs.append(["name", "vcore_per_node", "usable_ratio"])
+    hs.append(["std-64", 64, 0.8])
+    hc = wb.create_sheet("HW_Current")
+    hc.append(["fab", "bm_group", "sku", "count", "ag"])
+    hc.append(["A", "network1", "std-64", 2, "ag1"])
+    hc.append(["A", "network1", "std-64", 3, "ag2"])
+    wb.create_sheet("HW_MoveIn").append(
+        ["fab", "bm_group", "sku", "month", "count"])
+    hcap = wb.create_sheet("HW_Caps")
+    hcap.append(["fab", "network", "ag", "max_bm"])
+    hcap.append(["A", "network1", "ag1", 20])
+    hcap.append(["A", "network1", "ag2", 15])
+    wb.save(path)
+
+    pi = import_v2(path)
+    assert sorted({c.ag for c in pi.currents}) == ["ag1", "ag2"]
+    assert sum(c.count for c in pi.currents) == 5
+    a1 = Pool(fab="A", bm_group="network1")
+    caps = {cap.ag: cap.max_bm for cap in pi.caps if cap.pool == a1}
+    assert caps == {"ag1": 20, "ag2": 15}
+
+
+def test_hw_current_without_ag_defaults_empty(tmp_path):
+    # 舊檔 HW_Current 無 ag 欄 → ag 預設 "",caps 為空
+    path = _v2_file(tmp_path)   # generate_v2_template 產的 4 欄 HW_Current
+    pi = import_v2(path)
+    assert all(c.ag == "" for c in pi.currents)
+    assert pi.caps == []
+
+
 def test_old_format_still_imports(tmp_path):
     # 手工建一個含 VM_Spec 分頁的舊 v2,確認相容路徑仍可解析
     path = tmp_path / "old_v2.xlsx"

@@ -63,6 +63,7 @@ class CurrentStock:
     pool: Pool
     sku_name: str
     count: int
+    ag: str = ""            # 失效域(availability group);"" = 未指定
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,14 @@ class ProductPolicy:
     co_residency: str              # "free" | "exclusive" | 群組名
 
 
+@dataclass(frozen=True)
+class Cap:
+    """每個 AG 的採購槽位上限(來自 HW_Caps)。pool = fab × bm_group(network)。"""
+    pool: Pool
+    ag: str
+    max_bm: int
+
+
 @dataclass
 class PlanInput:
     skus: dict[str, Sku]
@@ -94,6 +103,7 @@ class PlanInput:
     currents: list[CurrentStock]
     issues: list[ImportIssue] = field(default_factory=list)
     policies: list[ProductPolicy] = field(default_factory=list)
+    caps: list["Cap"] = field(default_factory=list)
 
     def demand_vcore(self, pool: Pool, month: str) -> float:
         return sum(d.vcore for d in self.demands if d.pool == pool and d.month == month)

@@ -4,9 +4,9 @@ import math
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from captool.models import (CurrentStock, DemandDelta, ImportIssue, MoveIn,
-                            NodeReturn, PlanInput, Pool, ProductPolicy, Sku,
-                            VmSpecDemand)
+from captool.models import (Cap, CurrentStock, DemandDelta, ImportIssue,
+                            MoveIn, NodeReturn, PlanInput, Pool, ProductPolicy,
+                            Sku, VmSpecDemand)
 from captool.months import parse_month
 
 DEFAULT_SKU = Sku(name="default-64", vcore_per_node=64, usable_ratio=0.8)
@@ -95,14 +95,30 @@ def import_v2(path) -> PlanInput:
 
     # HW_Current / HW_MoveIn
     currents: list[CurrentStock] = []
-    for rec in _read_table(wb_v["HW_Current"], ["fab", "bm_group", "sku", "count"],
+    ws_cur = wb_v["HW_Current"]
+    has_ag = ws_cur.cell(row=1, column=5).value == "ag"   # ag 為選配第 5 欄
+    for rec in _read_table(ws_cur, ["fab", "bm_group", "sku", "count"],
                            issues, "HW_Current"):
         sku_name = valid_sku(rec["sku"], "HW_Current", rec["_row"])
         if sku_name is None:
             continue
         pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
         count = int(_numeric(rec["count"], issues, "HW_Current", f"D{rec['_row']}"))
-        currents.append(CurrentStock(pool=pool, sku_name=sku_name, count=count))
+        ag = (str(ws_cur.cell(row=rec["_row"], column=5).value or "")
+              if has_ag else "")
+        currents.append(CurrentStock(pool=pool, sku_name=sku_name, count=count,
+                                     ag=ag))
+
+    # HW_Caps(選配):每 AG 採購槽位上限
+    caps: list[Cap] = []
+    if "HW_Caps" in wb_v.sheetnames:
+        for rec in _read_table(wb_v["HW_Caps"],
+                               ["fab", "network", "ag", "max_bm"],
+                               issues, "HW_Caps"):
+            pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["network"]))
+            max_bm = int(_numeric(rec["max_bm"], issues, "HW_Caps",
+                                  f"D{rec['_row']}"))
+            caps.append(Cap(pool=pool, ag=str(rec["ag"]), max_bm=max_bm))
     moveins: list[MoveIn] = []
     for rec in _read_table(wb_v["HW_MoveIn"],
                            ["fab", "bm_group", "sku", "month", "count"],
@@ -299,7 +315,7 @@ def import_v2(path) -> PlanInput:
     return PlanInput(skus=skus, months=sorted(months), pools=pools,
                      demands=demands, vm_demands=vm_demands,
                      moveins=moveins, returns=returns, currents=currents,
-                     issues=issues, policies=policies)
+                     issues=issues, policies=policies, caps=caps)
 
 
 class _MonthParser:
