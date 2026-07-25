@@ -15,7 +15,8 @@ from captool.importer import CapacityImportError, import_any
 from captool.models import ImportIssue, Pool
 from captool.planner import run_check, run_suggest
 from captool.solver.naive import NaiveSolver
-from captool.viewmodel import (apply_movein_edits, movein_frame,
+from captool.solver.horizon_adapter import http_solve_fn, plan_horizon
+from captool.viewmodel import (apply_movein_edits, horizon_frame, movein_frame,
                                overview_frame, placements_frame,
                                prometheus_ag_placeholder, summary_frames)
 
@@ -54,7 +55,7 @@ with st.sidebar:
         _load(uploaded)
     mode = st.radio("推演模式", list(MODE_LABELS), format_func=MODE_LABELS.get)
     page = st.radio("頁面", ["匯入報告", "總表", "總覽", "驗證模式", "回推模式",
-                            "配置明細"])
+                            "配置明細", "Solver 規劃"])
 
 if "fatal_issues" in st.session_state and "plan_input" not in st.session_state:
     st.error("匯入失敗:")
@@ -199,3 +200,24 @@ elif page == "配置明細":
         if not o.feasible:
             st.error(f"{o.month}:缺 {o.shortfall_vcore:.0f} vcore"
                      + (f";單台裝不下的 VM:{o.blocked_vms}" if o.blocked_vms else ""))
+
+elif page == "Solver 規劃":
+    st.header("Solver 規劃(呼叫同事的 CP-SAT /v1/capacity/plan)")
+    st.caption("目前為 worker 路徑:把 worker 需求 + HW_Current(AG)+ HW_Caps 送給 solver,"
+               "回傳各 fab×月的採購建議與跨 AG 均衡。control-plane 菜單待 §6.2 對齊後接入。")
+    url = st.text_input("Solver capacity 端點",
+                        value="http://localhost:50051/v1/capacity/plan")
+    if st.button("呼叫 solver 規劃"):
+        try:
+            res = plan_horizon(plan_input, http_solve_fn(url))
+            st.session_state["horizon"] = res
+        except Exception as e:  # noqa: BLE001 — 對外呼叫,任何錯都回報給使用者
+            st.session_state.pop("horizon", None)
+            st.error(f"呼叫 solver 失敗:{e}(確認 server 有起在該 URL)")
+    if "horizon" in st.session_state:
+        res = st.session_state["horizon"]
+        if res.gaps:
+            st.error(f"共 {len(res.gaps)} 個缺口(fab×月)")
+        else:
+            st.success("所有 fab×月皆可行。")
+        st.dataframe(horizon_frame(res), use_container_width=True, hide_index=True)

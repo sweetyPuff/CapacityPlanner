@@ -69,6 +69,24 @@ def summary_frames(plan_result: PlanResult) -> "dict[str, pd.DataFrame]":
     return frames
 
 
+def horizon_frame(horizon_result) -> pd.DataFrame:
+    """HorizonResult(呼叫 solver /v1/capacity/plan 的結果)→ per (fab, 月份) 表。"""
+    rows = []
+    for o in horizon_result.outcomes:
+        rows.append({
+            "fab": o.fab,
+            "月份": o.period,
+            "狀態": "OK" if o.feasible else "缺口",
+            "新增節點": o.node_adds,
+            "採購": "; ".join(f"{k}×{v}" for k, v in sorted(o.procurement.items())),
+            "各 AG 剩餘 cpu": "; ".join(
+                f"{k}:{v}" for k, v in sorted(o.balance_after.items())),
+            "缺口": "; ".join(o.shortfalls),
+        })
+    return pd.DataFrame(rows, columns=[
+        "fab", "月份", "狀態", "新增節點", "採購", "各 AG 剩餘 cpu", "缺口"])
+
+
 def prometheus_ag_placeholder() -> pd.DataFrame:
     """未來 Prometheus 整合的欄位預覽(目前為假資料佔位)。
 

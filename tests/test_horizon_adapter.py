@@ -62,6 +62,20 @@ def test_plan_horizon_maps_report():
     assert captured["req"]["demand_book"][0]["cpu_cores"] == 100
 
 
+def test_horizon_frame():
+    from captool.viewmodel import horizon_frame
+    report = {"success": True, "by_fab_period": [{
+        "period": "2026-07", "success": True, "node_adds_total": 13,
+        "procurement": [{"type_id": "std-64", "count": 2}],
+        "balance_after": {"ag1": 10}, "cells": [], "shortfalls": []}]}
+    res = plan_horizon(_plan_input(), lambda req: report)
+    df = horizon_frame(res)
+    assert list(df.columns) == ["fab", "月份", "狀態", "新增節點", "採購",
+                                "各 AG 剩餘 cpu", "缺口"]
+    assert df.iloc[0]["狀態"] == "OK"
+    assert df.iloc[0]["採購"] == "std-64×2"
+
+
 def test_plan_horizon_reports_gap():
     report = {"success": False, "by_fab_period": [{
         "period": "2026-07", "success": False, "node_adds_total": 0,
