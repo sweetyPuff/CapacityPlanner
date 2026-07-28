@@ -57,6 +57,7 @@ class NodeReturn:
     sku_name: str
     month: str
     count: int
+    ag: str = ""            # 選配:退還機器所屬 AG
 
 
 @dataclass(frozen=True)

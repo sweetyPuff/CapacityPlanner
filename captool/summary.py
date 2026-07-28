@@ -50,11 +50,11 @@ def capacity_summary(plan_input, horizon_result=None) -> "dict[str, pd.DataFrame
         movein[f"{m.pool.fab}/{m.pool.bm_group}/{m.sku_name}/{m.ag or '-'}"][m.month] += m.count
     blocks["3. 進機 (台)(Fab/Network/SKU/AG)"] = _df(movein, months)
 
-    # 4. 退還(台)—— Fab/Network/SKU
+    # 4. 退還(台)—— Fab/Network/SKU/AG
     ret = defaultdict(lambda: defaultdict(int))
     for r in plan_input.returns:
-        ret[f"{r.pool.fab}/{r.pool.bm_group}/{r.sku_name}"][r.month] += r.count
-    blocks["4. 退還 (台)(Fab/Network/SKU)"] = _df(ret, months)
+        ret[f"{r.pool.fab}/{r.pool.bm_group}/{r.sku_name}/{r.ag or '-'}"][r.month] += r.count
+    blocks["4. 退還 (台)(Fab/Network/SKU/AG)"] = _df(ret, months)
 
     # 5. 剩餘可用 vcore(月末)—— Fab/Network/AG(solver)
     if horizon_result is not None:

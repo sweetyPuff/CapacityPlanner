@@ -12,7 +12,7 @@ def _pi():
         skus={SKU.name: SKU}, months=["2026-07", "2026-08"], pools=[A1],
         demands=[DemandDelta(pool=A1, product="web", month="2026-07", vcore=200)],
         vm_demands=[], returns=[NodeReturn(pool=A1, product="old", sku_name="std-64",
-                                           month="2026-08", count=2)],
+                                           month="2026-08", count=2, ag="ag2")],
         moveins=[MoveIn(pool=A1, sku_name="std-64", month="2026-08", count=3,
                         ag="ag1")],
         currents=[CurrentStock(pool=A1, sku_name="std-64", count=5, ag="ag1")])
@@ -23,8 +23,8 @@ def test_input_blocks_without_solver():
     assert blocks["1. 需求 vcore(Fab/Network)"].loc["A/network1", "2026-07"] == 200
     assert blocks["3. 進機 (台)(Fab/Network/SKU/AG)"].loc[
         "A/network1/std-64/ag1", "2026-08"] == 3
-    assert blocks["4. 退還 (台)(Fab/Network/SKU)"].loc[
-        "A/network1/std-64", "2026-08"] == 2
+    assert blocks["4. 退還 (台)(Fab/Network/SKU/AG)"].loc[
+        "A/network1/std-64/ag2", "2026-08"] == 2
     # 沒 solver → 無實體機需求 / 剩餘 vcore 區塊
     assert not any("實體機需求" in k for k in blocks)
 

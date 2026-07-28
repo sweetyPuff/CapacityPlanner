@@ -276,7 +276,10 @@ def import_v2(path) -> PlanInput:
                         max_per_machine=max_per_machine,
                         co_residency=_parse_coresidency(coresid_raw)))
                 row += 1
-            return_cols = _month_columns(ws, 4, 23, parser, name)
+            # 退還:機型於 V(22);選配 ag 於 W(23)→ 月份右移到 X(24)
+            ret_has_ag = ws.cell(row=4, column=23).value == "ag"
+            return_cols = _month_columns(ws, 4, 24 if ret_has_ag else 23,
+                                         parser, name)
             row = 5
             while ws.cell(row=row, column=20).value is not None:
                 product = str(ws.cell(row=row, column=20).value)
@@ -292,6 +295,8 @@ def import_v2(path) -> PlanInput:
                     if sku_name is None:
                         row += 1
                         continue
+                ret_ag = (str(ws.cell(row=row, column=23).value or "")
+                          if ret_has_ag else "")
                 pool = Pool(fab=name, bm_group=group)
                 for col, month in return_cols:
                     coord = f"{get_column_letter(col)}{row}"
@@ -300,7 +305,7 @@ def import_v2(path) -> PlanInput:
                     if cnt:
                         returns.append(NodeReturn(pool=pool, product=product,
                                                   sku_name=sku_name, month=month,
-                                                  count=int(cnt)))
+                                                  count=int(cnt), ag=ret_ag))
                 row += 1
         else:
             # 舊 v2 格式(或 legacy):需求月份自 C(3),Return 月份自 N(14)

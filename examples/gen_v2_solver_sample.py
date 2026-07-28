@@ -40,10 +40,10 @@ DEMAND_ROWS = [
     ("B", "c-mega", "network1", None, None, "", "E", {"2026-09": 1}),    # 9月建1個 menu E(重)
     ("C", "c-twin", "network2", None, None, "", "D", {"2026-07": 2}),    # 7月建2個 menu D
 ]
-# 退回列:(fab, product, group, sku, {month: count})
+# 退回列:(fab, product, group, sku, ag, {month: count})
 RETURN_ROWS = [
-    ("A", "old-a", "network1", "std-64", {"2026-07": 3}),
-    ("B", "old-b", "network1", "std-64", {"2026-09": 2}),
+    ("A", "old-a", "network1", "std-64", "ag1", {"2026-07": 3}),
+    ("B", "old-b", "network1", "std-64", "ag2", {"2026-09": 2}),
 ]
 # HW_Current 帶 AG:(fab, bm_group, sku, count, ag);A/C 佈 5 個 AG(菜單 master×5 要分得開)
 CURRENT = [
@@ -87,9 +87,10 @@ def build(path):
         wf.cell(row=4, column=20, value="Product")
         wf.cell(row=4, column=21, value="BM Group")
         wf.cell(row=4, column=22, value="機型")
+        wf.cell(row=4, column=23, value="ag")          # 退還選配 AG(W)
         for i, m in enumerate(MONTHS):
-            wf.cell(row=4, column=7 + i, value=m)     # 需求月份 G 起
-            wf.cell(row=4, column=23 + i, value=m)    # 退回月份 W 起
+            wf.cell(row=4, column=7 + i, value=m)      # 需求月份 G 起
+            wf.cell(row=4, column=24 + i, value=m)     # 退回月份 X 起
         r = 5
         for (f, prod, grp, vc, blast, tenant, menu, mvals) in DEMAND_ROWS:
             if f != fab:
@@ -111,17 +112,18 @@ def build(path):
                     wf.cell(row=r, column=c).fill = BLUE   # new build 列標藍底
             r += 1
         r = 5
-        for (f, prod, grp, sku, mvals) in RETURN_ROWS:
+        for (f, prod, grp, sku, ag, mvals) in RETURN_ROWS:
             if f != fab:
                 continue
             wf.cell(row=r, column=20, value=prod)
             wf.cell(row=r, column=21, value=grp)
             wf.cell(row=r, column=22, value=sku)
+            wf.cell(row=r, column=23, value=ag)
             for i, m in enumerate(MONTHS):
                 if m in mvals:
-                    wf.cell(row=r, column=23 + i, value=mvals[m])
+                    wf.cell(row=r, column=24 + i, value=mvals[m])
             r += 1
-        for c in list(range(1, 7)) + [20, 21, 22]:
+        for c in list(range(1, 7)) + [20, 21, 22, 23]:
             wf.cell(row=4, column=c).font = BOLD
 
     hs = wb.create_sheet("HW_SKU")
