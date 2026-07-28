@@ -30,13 +30,17 @@ def test_input_blocks_without_solver():
 
 
 def test_solver_blocks_with_horizon():
-    hr = HorizonResult(outcomes=[HorizonOutcome(
-        fab="A", period="2026-07", feasible=True, node_adds=5,
-        procurement={}, balance_after={}, ag_available={}, shortfalls=[],
-        cells=[{"network": "network1", "ag": "ag1", "bm_bought": 1,
-                "in_stock_bm_used": 2, "node_adds": 5, "available_vcore": 100}])])
+    hr = HorizonResult(
+        outcomes=[HorizonOutcome(
+            fab="A", period="2026-07", feasible=True, node_adds=5,
+            procurement={}, balance_after={}, ag_available={}, shortfalls=[],
+            cells=[{"network": "network1", "ag": "ag1", "bm_bought": 1,
+                    "in_stock_bm_used": 2, "node_adds": 5,
+                    "available_vcore": 100}])],
+        budget=[{"fab": "A", "network": "network1", "ag": "ag1",
+                 "period": "2026-07", "sku": "std-64", "count": 2}])
     blocks = capacity_summary(_pi(), hr)
-    assert blocks["2. 實體機需求 (台)(Fab/Network/AG,solver)"].loc[
-        "A/network1/ag1", "2026-07"] == 3          # bm_bought 1 + in_stock_bm_used 2
+    assert blocks["2. 實體機需求-採購 (台)(Fab/Network/SKU/AG,solver)"].loc[
+        "A/network1/std-64/ag1", "2026-07"] == 2   # budget_view 採購台數
     assert blocks["5. 剩餘可用 vcore (月末)(Fab/Network/AG,solver)"].loc[
         "A/network1/ag1", "2026-07"] == 100

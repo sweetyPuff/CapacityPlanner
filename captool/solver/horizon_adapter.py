@@ -110,6 +110,8 @@ class HorizonOutcome:
 @dataclass
 class HorizonResult:
     outcomes: list[HorizonOutcome] = field(default_factory=list)
+    # 採購明細(來自 CapacityReport.budget_view):每筆 = fab/network/ag/period/sku/count
+    budget: list[dict] = field(default_factory=list)
 
     @property
     def gaps(self) -> list[HorizonOutcome]:
@@ -153,6 +155,11 @@ def plan_horizon(plan_input: PlanInput, solve_fn: SolveFn,
             continue
         report = solve_fn(req)
         result.outcomes.extend(_map_report(fab, report))
+        for b in report.get("budget_view", []):
+            result.budget.append({
+                "fab": fab, "network": b.get("network", ""),
+                "ag": b.get("bucket", ""), "period": b.get("period", ""),
+                "sku": b.get("type_id", ""), "count": b.get("bm_count", 0)})
     return result
 
 

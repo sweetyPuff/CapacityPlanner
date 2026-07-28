@@ -35,14 +35,12 @@ def capacity_summary(plan_input, horizon_result=None) -> "dict[str, pd.DataFrame
         demand[f"{v.pool.fab}/{v.pool.bm_group}"][v.month] += v.vm_size_vcore * v.count
     blocks["1. 需求 vcore(Fab/Network)"] = _df(demand, months)
 
-    # 2. 實體機需求(台)—— Fab/Network/AG(solver)
+    # 2. 實體機需求(採購,台)—— Fab/Network/SKU/AG(solver budget_view)
     if horizon_result is not None:
         req = defaultdict(lambda: defaultdict(int))
-        for o in horizon_result.outcomes:
-            for c in o.cells:
-                req[f"{o.fab}/{c['network']}/{c['ag']}"][o.period] += (
-                    c["bm_bought"] + c["in_stock_bm_used"])
-        blocks["2. 實體機需求 (台)(Fab/Network/AG,solver)"] = _df(req, months)
+        for b in horizon_result.budget:
+            req[f"{b['fab']}/{b['network']}/{b['sku']}/{b['ag']}"][b["period"]] += b["count"]
+        blocks["2. 實體機需求-採購 (台)(Fab/Network/SKU/AG,solver)"] = _df(req, months)
 
     # 3. 進機(台)—— Fab/Network/SKU/AG
     movein = defaultdict(lambda: defaultdict(int))
@@ -61,7 +59,8 @@ def capacity_summary(plan_input, horizon_result=None) -> "dict[str, pd.DataFrame
         avail = defaultdict(lambda: defaultdict(float))
         for o in horizon_result.outcomes:
             for c in o.cells:
-                avail[f"{o.fab}/{c['network']}/{c['ag']}"][o.period] = c["available_vcore"]
+                avail[f"{o.fab}/{c['network']}/{c['ag']}"][o.period] = c.get(
+                    "available_vcore", 0)
         blocks["5. 剩餘可用 vcore (月末)(Fab/Network/AG,solver)"] = _df(avail, months)
 
     return blocks

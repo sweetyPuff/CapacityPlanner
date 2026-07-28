@@ -61,6 +61,27 @@ if "plan_input" not in st.session_state:
 
 plan_input = st.session_state["plan_input"]
 
+_ALL_AGS = ({c.ag for c in plan_input.currents if c.ag}
+            | {cap.ag for cap in plan_input.caps}
+            | {m.ag for m in plan_input.moveins if m.ag}
+            | {r.ag for r in plan_input.returns if r.ag})
+
+
+def _filter_block(df, fabs, nets, ags):
+    """依 row key(fab/network/.../ag)過濾:空選 = 全顯示;AG 過濾只作用於有 AG 維度的列。"""
+    keep = []
+    for idx in df.index:
+        segs = str(idx).split("/")
+        if fabs and segs[0] not in fabs:
+            continue
+        if nets and len(segs) > 1 and segs[1] not in nets:
+            continue
+        if ags and segs[-1] in _ALL_AGS and segs[-1] not in ags:
+            continue
+        keep.append(idx)
+    return df.loc[keep]
+
+
 if page == "匯入報告":
     st.header("匯入報告")
     st.write(f"檔案:{st.session_state['source_name']}|機型:{len(plan_input.skus)}"
@@ -92,9 +113,18 @@ elif page == "總表":
     else:
         st.success("solver 求解:所有 fab×月皆可行。")
 
+    fabs = sorted({p.fab for p in plan_input.pools})
+    nets = sorted({p.bm_group for p in plan_input.pools})
+    ags = sorted(_ALL_AGS)
+    c1, c2, c3 = st.columns(3)
+    f_fab = c1.multiselect("Fab", fabs)
+    f_net = c2.multiselect("Network", nets)
+    f_ag = c3.multiselect("AG", ags)
+
     for name, df in capacity_summary(plan_input, horizon).items():
         st.subheader(name)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(_filter_block(df, f_fab, f_net, f_ag),
+                     use_container_width=True)
 
     st.subheader("6. 各 AG 節點現況(Prometheus,假資料)")
     st.caption("未來由 Prometheus 取得每 cluster 已安裝 / cordon 節點數、各 AG 節點總數,"
