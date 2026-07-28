@@ -72,10 +72,10 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
         "容量規劃 v2 範本填表說明(新版面)",
         "",
         "各廠區 tab —— 需求區(A 欄起):",
-        "  A=Product, B=BM Group, C=VM vcore, D=每台上限, E=共居, F 欄起為各月 vcore。",
+        "  A=Product, B=BM Group, C=VM vcore, D=爆炸半徑(1:x), E=Tenant, F 欄起為各月 vcore。",
         "  C(VM vcore)空 = 粗粒度需求(整包 vcore);有值 = 每顆 VM 的 vcore 尺寸。",
-        "  D(每台上限)= 一台實體機最多住幾顆該 VM(1:X 的 X,亦即爆炸半徑上限);空=不限。",
-        "  E(共居)= 空(自由,可與其他自由 product 混) / 獨佔 / 群組名(同名才可共用)。",
+        "  D(爆炸半徑 1:x)= 一台實體機最多住幾顆該 VM(EX: 2);空=不限。",
+        "  E(Tenant)= 自由(留空,可與其他自由 product 混) / 指定群組名(同名才可共用) / 獨佔。",
         "  每月一律填 vcore;detail product 的顆數由 vcore ÷ VM vcore 反推(非整數倍會進位並提示)。",
         "  同 product 若配置改變,請拆成兩列(如 A-1:1、A-1:2)。",
         "退回區(T 欄起):T=Product, U=BM Group, V=機型, W 欄起為各月退回台數。",
@@ -93,7 +93,9 @@ def generate_v2_template(plan_input: PlanInput, path) -> None:
     for fab in fabs:
         wf = wb.create_sheet(fab)
         wf["A4"], wf["B4"] = "Product", "BM Group"
-        wf["C4"], wf["D4"], wf["E4"] = "VM vcore", "每台上限", "共居"
+        wf["C4"] = "VM vcore"
+        wf["D4"] = "爆炸半徑 (1:x), EX: 2"
+        wf["E4"] = "Tenant (自由=留空/指定群組/獨佔)"
         wf.cell(row=4, column=20, value="Product")
         wf.cell(row=4, column=21, value="BM Group")
         wf.cell(row=4, column=22, value="機型")

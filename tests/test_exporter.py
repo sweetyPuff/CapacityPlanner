@@ -49,7 +49,8 @@ def test_generate_v2_template(tmp_path):
     assert "VM_Spec" not in wb.sheetnames          # 新格式移除獨立分頁
     wa = wb["A"]
     assert [wa.cell(row=4, column=c).value for c in range(1, 6)] == \
-        ["Product", "BM Group", "VM vcore", "每台上限", "共居"]
+        ["Product", "BM Group", "VM vcore",
+         "爆炸半徑 (1:x), EX: 2", "Tenant (自由=留空/指定群組/獨佔)"]
     assert wa.cell(row=4, column=6).value == "2026-07"   # 月份自 F
     assert wa.cell(row=4, column=20).value == "Product"  # 退回區 Product 於 T
     assert wa.cell(row=4, column=22).value == "機型"

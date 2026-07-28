@@ -35,7 +35,9 @@ def build(path):
     for fab in fabs:
         wf = wb.create_sheet(fab)
         wf["A4"], wf["B4"] = "Product", "BM Group"
-        wf["C4"], wf["D4"], wf["E4"] = "VM vcore", "每台上限", "共居"
+        wf["C4"] = "VM vcore"
+        wf["D4"] = "爆炸半徑 (1:x), EX: 2"
+        wf["E4"] = "Tenant (自由=留空/指定群組/獨佔)"
         wf.cell(row=4, column=20, value="Product")
         wf.cell(row=4, column=21, value="BM Group")
         wf.cell(row=4, column=22, value="機型")
