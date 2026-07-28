@@ -103,6 +103,8 @@ class HorizonOutcome:
     balance_after: dict[str, int]      # ag -> 剩餘 cpu
     ag_available: dict[str, int]       # ag -> in_stock_available cpu(月末)
     shortfalls: list[str]
+    # 每個 (network, ag) 的硬體數:實體機需求 = in_stock_bm_used + bm_bought
+    cells: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -122,6 +124,12 @@ def _map_report(fab: str, report: dict) -> list[HorizonOutcome]:
     for pf in report.get("by_fab_period", []):
         ag_avail = {c["bucket"]: c.get("in_stock_available", {}).get("cpu_cores", 0)
                     for c in pf.get("cells", [])}
+        cells = [{"network": c.get("network", ""), "ag": c["bucket"],
+                  "bm_bought": c.get("bm_bought", 0),
+                  "in_stock_bm_used": c.get("in_stock_bm_used", 0),
+                  "node_adds": c.get("node_adds", 0),
+                  "available_vcore": c.get("in_stock_available", {}).get("cpu_cores", 0)}
+                 for c in pf.get("cells", [])]
         out.append(HorizonOutcome(
             fab=fab, period=pf["period"], feasible=pf["success"],
             node_adds=pf.get("node_adds_total", 0),
@@ -129,6 +137,7 @@ def _map_report(fab: str, report: dict) -> list[HorizonOutcome]:
             balance_after=dict(pf.get("balance_after", {})),
             ag_available=ag_avail,
             shortfalls=[s.get("message", "") for s in pf.get("shortfalls", [])],
+            cells=cells,
         ))
     return out
 
