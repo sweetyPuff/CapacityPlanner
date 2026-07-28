@@ -47,6 +47,7 @@ class MoveIn:
     sku_name: str
     month: str
     count: int
+    ag: str = ""            # 選配:進機落點 AG;"" = 未定(solver 自選)
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,17 @@ class Cap:
     max_bm: int
 
 
+@dataclass(frozen=True)
+class NewBuild:
+    """fab 頁上 Menu 欄非 Worker 的列:某月在某 pool 用某菜單建幾個 cluster。
+    cluster = 該列的 Product;menu 對應 Cluster_Menu 的菜單名。"""
+    pool: Pool
+    cluster: str
+    menu: str
+    month: str
+    count: int
+
+
 @dataclass
 class PlanInput:
     skus: dict[str, Sku]
@@ -104,6 +116,9 @@ class PlanInput:
     issues: list[ImportIssue] = field(default_factory=list)
     policies: list[ProductPolicy] = field(default_factory=list)
     caps: list["Cap"] = field(default_factory=list)
+    new_builds: list["NewBuild"] = field(default_factory=list)
+    # 菜單目錄:menu 名 -> [(role, count, co_residency, vm_vcore)]
+    menus: dict[str, list] = field(default_factory=dict)
 
     def demand_vcore(self, pool: Pool, month: str) -> float:
         return sum(d.vcore for d in self.demands if d.pool == pool and d.month == month)

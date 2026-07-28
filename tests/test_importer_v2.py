@@ -90,6 +90,41 @@ def test_import_any_dispatches_new(tmp_path):
     assert import_any(path).months == import_v2(path).months
 
 
+def test_menu_column_worker_and_newbuild(tmp_path):
+    from openpyxl import Workbook
+    path = tmp_path / "menu.xlsx"
+    wb = Workbook()
+    wb.remove(wb.active)
+    a = wb.create_sheet("A")
+    a["A4"], a["B4"], a["C4"], a["F4"] = "Product", "BM Group", "VM vcore", "Menu"
+    a["G4"], a["H4"] = "2026-07", "2026-08"      # Menu 欄在 F,月份右移到 G
+    # worker 列
+    a["A5"], a["B5"], a["F5"], a["G5"] = "web", "network1", "Worker", 200
+    # new build 列(Menu=B,月份=cluster 數)
+    a["A6"], a["B6"], a["F6"], a["H6"] = "c-x", "network1", "B", 1
+    hs = wb.create_sheet("HW_SKU")
+    hs.append(["name", "vcore_per_node", "usable_ratio"])
+    hs.append(["std-64", 64, 0.8])
+    wb.create_sheet("HW_Current").append(["fab", "bm_group", "sku", "count"])
+    wb.create_sheet("HW_MoveIn").append(
+        ["fab", "bm_group", "sku", "month", "count"])
+    cm = wb.create_sheet("Cluster_Menu")
+    cm.append(["menu", "role", "count", "co_residency", "vm_vcore"])
+    cm.append(["B", "master", 5, "shared", 16])
+    wb.save(path)
+
+    pi = import_v2(path)
+    a1 = Pool(fab="A", bm_group="network1")
+    # worker 列 → 需求;month 從 G 讀對
+    assert pi.demand_vcore(a1, "2026-07") == 200
+    # new build 列 → 不進 demands,進 new_builds
+    assert all(d.product != "c-x" for d in pi.demands)
+    assert len(pi.new_builds) == 1
+    nb = pi.new_builds[0]
+    assert (nb.cluster, nb.menu, nb.month, nb.count) == ("c-x", "B", "2026-08", 1)
+    assert pi.menus["B"] == [("master", 5, "shared", 16)]
+
+
 def test_hw_current_ag_and_caps(tmp_path):
     from openpyxl import Workbook
     path = tmp_path / "ag.xlsx"

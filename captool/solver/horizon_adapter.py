@@ -35,12 +35,25 @@ def build_capacity_plan_request(plan_input: PlanInput, fab: str,
                                 worker_vm: dict = DEFAULT_WORKER_VM,
                                 max_solve_time_seconds: float = 10.0) -> dict:
     """單一 fab 的 CapacityPlanRequest(single-fab 模式 fab="",network=bm_group)。"""
+    # 粗粒度 worker:整包 vcore,solver 用預設 worker VM 規格切
     demand_book = [
         {"cluster_id": d.product, "node_role": "worker", "period": d.month,
          "cpu_cores": int(d.vcore), "network": d.pool.bm_group,
          "vm_specs": [worker_vm]}
         for d in plan_input.demands if d.pool.fab == fab and d.vcore
     ]
+    # detail worker:固定顆數 × 指定 VM 尺寸(min=max=count)。
+    # TODO(§6.2 同步):爆炸半徑(max_per_bm)與 Tenant(共居)尚未下約束,先只送需求。
+    for v in plan_input.vm_demands:
+        if v.pool.fab != fab:
+            continue
+        demand_book.append({
+            "cluster_id": v.product, "node_role": "worker", "period": v.month,
+            "cpu_cores": v.vm_size_vcore * v.count, "network": v.pool.bm_group,
+            "vm_specs": [{"cpu_cores": v.vm_size_vcore, "memory_mib": 0,
+                          "storage_gb": 0}],
+            "min_total_vms": v.count, "max_total_vms": v.count,
+        })
 
     in_stock = []
     for c in plan_input.currents:

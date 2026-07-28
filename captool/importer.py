@@ -5,8 +5,8 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from captool.models import (Cap, CurrentStock, DemandDelta, ImportIssue,
-                            MoveIn, NodeReturn, PlanInput, Pool, ProductPolicy,
-                            Sku, VmSpecDemand)
+                            MoveIn, NewBuild, NodeReturn, PlanInput, Pool,
+                            ProductPolicy, Sku, VmSpecDemand)
 from captool.months import parse_month
 
 DEFAULT_SKU = Sku(name="default-64", vcore_per_node=64, usable_ratio=0.8)
@@ -120,7 +120,9 @@ def import_v2(path) -> PlanInput:
                                   f"D{rec['_row']}"))
             caps.append(Cap(pool=pool, ag=str(rec["ag"]), max_bm=max_bm))
     moveins: list[MoveIn] = []
-    for rec in _read_table(wb_v["HW_MoveIn"],
+    ws_mi = wb_v["HW_MoveIn"]
+    mi_has_ag = ws_mi.cell(row=1, column=6).value == "ag"   # ag 為選配第 6 欄
+    for rec in _read_table(ws_mi,
                            ["fab", "bm_group", "sku", "month", "count"],
                            issues, "HW_MoveIn"):
         sku_name = valid_sku(rec["sku"], "HW_MoveIn", rec["_row"])
@@ -132,7 +134,24 @@ def import_v2(path) -> PlanInput:
         months.add(month)
         pool = Pool(fab=str(rec["fab"]), bm_group=str(rec["bm_group"]))
         count = int(_numeric(rec["count"], issues, "HW_MoveIn", f"E{rec['_row']}"))
-        moveins.append(MoveIn(pool=pool, sku_name=sku_name, month=month, count=count))
+        ag = (str(ws_mi.cell(row=rec["_row"], column=6).value or "")
+              if mi_has_ag else "")
+        moveins.append(MoveIn(pool=pool, sku_name=sku_name, month=month,
+                              count=count, ag=ag))
+
+    # Cluster_Menu(選配):菜單目錄 menu -> [(role, count, co_residency, vm_vcore)]
+    menus: dict[str, list] = {}
+    if "Cluster_Menu" in wb_v.sheetnames:
+        for rec in _read_table(wb_v["Cluster_Menu"],
+                               ["menu", "role", "count", "co_residency",
+                                "vm_vcore"], issues, "Cluster_Menu"):
+            menus.setdefault(str(rec["menu"]), []).append((
+                str(rec["role"]),
+                int(_numeric(rec["count"], issues, "Cluster_Menu",
+                             f"C{rec['_row']}")),
+                str(rec["co_residency"]),
+                int(_numeric(rec["vm_vcore"], issues, "Cluster_Menu",
+                             f"E{rec['_row']}"))))
 
     # VM_Spec (optional in new v2 format)
     vm_demands: list[VmSpecDemand] = []
@@ -158,6 +177,7 @@ def import_v2(path) -> PlanInput:
     demands: list[DemandDelta] = []
     returns: list[NodeReturn] = []
     policies: list[ProductPolicy] = []
+    new_builds: list[NewBuild] = []
     fab_sheets = [n for n in wb_v.sheetnames if n not in NON_FAB_SHEETS]
     for name in fab_sheets:
         ws = wb_v[name]
@@ -166,8 +186,10 @@ def import_v2(path) -> PlanInput:
         is_new_format = c4_value == "VM vcore"
 
         if is_new_format:
-            # 新 v2 格式:需求月份自 F(6),Return 月份自 W(23)
-            demand_cols = _month_columns(ws, 4, 6, parser, name)
+            # 選配 Menu 欄(F):有的話月份右移到 G(7),該欄區分 Worker / 菜單(new build)
+            has_menu = ws.cell(row=4, column=6).value == "Menu"
+            demand_cols = _month_columns(ws, 4, 7 if has_menu else 6,
+                                         parser, name)   # Return 月份自 W(23)
             row = 5
             while ws.cell(row=row, column=1).value is not None:
                 product = str(ws.cell(row=row, column=1).value)
@@ -176,6 +198,24 @@ def import_v2(path) -> PlanInput:
                     continue
                 group = str(ws.cell(row=row, column=2).value)
                 pool = Pool(fab=name, bm_group=group)
+
+                # Menu 欄非 Worker → new build 列(月份填當月建幾個 cluster)
+                if has_menu:
+                    mv = ws.cell(row=row, column=6).value
+                    menu = str(mv).strip() if mv not in (None, "") else ""
+                    if menu and menu.lower() != "worker":
+                        for col, month in demand_cols:
+                            cnt = _numeric(ws.cell(row=row, column=col).value,
+                                           issues, name,
+                                           f"{get_column_letter(col)}{row}")
+                            months.add(month)
+                            if cnt:
+                                new_builds.append(NewBuild(
+                                    pool=pool, cluster=product, menu=menu,
+                                    month=month, count=int(cnt)))
+                        row += 1
+                        continue
+
                 vm_size = ws.cell(row=row, column=3).value
                 max_per = ws.cell(row=row, column=4).value
                 coresid_raw = ws.cell(row=row, column=5).value
@@ -315,7 +355,8 @@ def import_v2(path) -> PlanInput:
     return PlanInput(skus=skus, months=sorted(months), pools=pools,
                      demands=demands, vm_demands=vm_demands,
                      moveins=moveins, returns=returns, currents=currents,
-                     issues=issues, policies=policies, caps=caps)
+                     issues=issues, policies=policies, caps=caps,
+                     new_builds=new_builds, menus=menus)
 
 
 class _MonthParser:
