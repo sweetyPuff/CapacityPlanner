@@ -62,6 +62,9 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
 
 上傳 → 「總表」→ 按「呼叫 solver 求解」。維度:多機型 × 多 AG。
 
+![總表:需求 vcore 與維度 filter](snapshot/summary-input.png)
+![總表:退還與各 AG 節點現況](snapshot/summary-blocks.png)
+
 | 區塊 | 維度 | 來源 |
 |---|---|---|
 | 1. 需求 vcore | Fab / Network | 輸入(coarse + detail) |
@@ -80,24 +83,64 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
 - **剩餘庫存以 vcore 而非台數** —— 多機型 + 共居下一台機住多顆 VM 仍是一台,
   台數不再良好定義,剩餘可用 vcore 才有意義。
 
-## 4. 執行方式
+## 4. 安裝與執行
 
-啟動同事的 solver(獨立 venv;她的 pyproject 標 requires-python≥3.13,3.12 直接裝依賴繞過):
+### 4.1 安裝(本工具)
+
+需要 Python 3.12+。在專案根目錄:
 
 ```bash
-# solver(在 solver-develop/solver-develop/ 下,獨立 venv)
+# Windows (PowerShell)
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+```bash
+# macOS / Linux
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+依賴(`requirements.txt`):`openpyxl`、`pandas`、`streamlit`、`pytest`。
+本工具**不含** ortools —— 求解走 HTTP 打同事的 solver(見 4.3)。
+
+### 4.2 啟動 UI
+
+```bash
+# Windows
+.venv\Scripts\python.exe -m streamlit run app\streamlit_app.py
+```
+
+```bash
+# macOS / Linux
+.venv/bin/python -m streamlit run app/streamlit_app.py
+```
+
+瀏覽器開 `http://localhost:8501` → 左側上傳 Excel → 「總表」→ 按「呼叫 solver 求解」。
+範例輸入:`examples/v2_sample_solver.xlsx`(統一版面、各情境、HW 帶 AG、菜單 A~E);
+產生器:`examples/gen_v2_solver_sample.py`。
+
+> 改動 `captool/` 的 model / 函式後,長跑的 Streamlit 會抱著舊模組快取 —— 重啟即可(見 §6)。
+
+### 4.3 啟動 solver(同事的獨立專案)
+
+solver 為**獨立 repo**(`solver-develop/`,本專案 gitignore、不隨本包上傳),需另行取得並自行架設。
+她的 `pyproject` 標 `requires-python≥3.13`;若用 3.12,直接裝依賴繞過版本限制即可:
+
+```bash
+# 在 solver-develop/solver-develop/ 下,建議獨立 venv
 pip install ortools pydantic fastapi uvicorn swagger-ui-bundle "pandas==2.3.3"
 PYTHONPATH=. python -m app.server --port 50051
 ```
 
-啟動工具 UI:
+UI 左側「Solver 端點」預設 `http://localhost:50051/v1/capacity/plan`,對齊上面的 port。
+
+### 4.4 測試
 
 ```bash
-.venv\Scripts\python.exe -m streamlit run app\streamlit_app.py
+.venv\Scripts\python.exe -m pytest      # Windows
+.venv/bin/python -m pytest              # macOS / Linux
 ```
-
-範例輸入:`examples/v2_sample_solver.xlsx`(統一版面、各情境、HW 帶 AG、菜單 A~E)。
-產生器:`examples/gen_v2_solver_sample.py`。
 
 ## 5. 現況與待辦
 
