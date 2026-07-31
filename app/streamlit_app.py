@@ -126,7 +126,7 @@ elif page == "總表":
         st.dataframe(_filter_block(df, f_fab, f_net, f_ag),
                      use_container_width=True)
 
-    st.subheader("6. 各 AG 節點現況(Prometheus,假資料)")
+    st.subheader("7. 各 AG 節點現況(Prometheus,假資料)")
     st.caption("未來由 Prometheus 取得每 cluster 已安裝 / cordon 節點數、各 AG 節點總數,"
                "供 expand / delete 分配各 AG。目前為假資料。")
     st.dataframe(prometheus_ag_placeholder(), use_container_width=True,

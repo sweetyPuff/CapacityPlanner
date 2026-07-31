@@ -72,7 +72,8 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
 | 3. 進機 (台) | Fab / Network / SKU / AG | 輸入(HW_MoveIn) |
 | 4. 退還 (台) | Fab / Network / SKU / AG | 輸入(HW 退還區,選配 ag) |
 | 5. 剩餘可用 vcore(月末) | Fab / Network / AG | solver(cell in_stock_available) |
-| 6. 各 AG 節點現況 | cluster / AG | Prometheus(**未來,目前假資料**) |
+| 6. 需求 ↔ 供給機型對照 | Fab / Network / **SKU** | solver `budget_view` + 輸入(需求產品、in-stock 既有台數) |
+| 7. 各 AG 節點現況 | cluster / AG | Prometheus(**未來,目前假資料**) |
 
 **維度 filter**:頁上有 Fab / Network / AG 三個多選,空=全顯示;AG filter 只作用於有 AG 維度的區塊。
 
@@ -82,6 +83,10 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
   只有採購(budget_view)分 SKU;採購才是可執行的「要買什麼」。
 - **剩餘庫存以 vcore 而非台數** —— 多機型 + 共居下一台機住多顆 VM 仍是一台,
   台數不再良好定義,剩餘可用 vcore 才有意義。
+- **需求↔供給只到 network 層(區塊 6)** —— network 是硬分區(需求輸入即帶),同
+  network 需求共用機器池;solver 的 `budget_view` 最細只到 (fab, network, AG, 月, SKU),
+  **沒有 cluster/demand 欄位**(solver 決議 #21/#37 刻意不做逐需求)。逐 cluster→SKU 需另呼叫
+  `/v1/placement/split-and-solve` 逐 VM 求解,且分配是任意 tie-break、語意模糊,故不採。
 
 ## 4. 安裝與執行
 

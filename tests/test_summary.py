@@ -44,3 +44,8 @@ def test_solver_blocks_with_horizon():
         "A/network1/std-64/ag1", "2026-07"] == 2   # budget_view 採購台數
     assert blocks["5. 剩餘可用 vcore (月末)(Fab/Network/AG,solver)"].loc[
         "A/network1/ag1", "2026-07"] == 100
+    # 區塊 6:需求 ↔ 供給機型對照(Fab/Network/SKU;需求產品 + 既有台數 + 月採購)
+    b6 = blocks["6. 需求 ↔ 供給機型對照 (Fab/Network/SKU,solver)"]
+    assert b6.loc["A/network1/std-64", "2026-07"] == 2     # budget 採購台數
+    assert b6.loc["A/network1/std-64", "既有台數"] == 5      # currents in-stock
+    assert "web" in b6.loc["A/network1/std-64", "需求產品"]  # 該 network 的需求
