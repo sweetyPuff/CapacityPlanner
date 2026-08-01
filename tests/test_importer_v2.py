@@ -125,6 +125,45 @@ def test_menu_column_worker_and_newbuild(tmp_path):
     assert pi.menus["B"] == [("master", 5, "shared", 16)]
 
 
+def test_cluster_column_shifts_and_parses(tmp_path):
+    # 新格式含 Cluster 欄(C)→ 整區右移 1;需求/退還都要讀對,且 cluster 帶進 model
+    path = tmp_path / "cluster.xlsx"
+    wb = Workbook()
+    wb.remove(wb.active)
+    a = wb.create_sheet("A")
+    a["A4"], a["B4"], a["C4"], a["D4"] = "Product", "BM Group", "Cluster", "VM vcore"
+    a["E4"], a["F4"], a["G4"] = "爆炸半徑", "Tenant", "Menu"
+    a["H4"], a["I4"] = "2026-07", "2026-08"
+    # detail 列:giga / cluster=stg1 / VM vcore 60 / Worker / 2026-07=180(→3 台)
+    a["A5"], a["B5"], a["C5"], a["D5"] = "giga", "network1", "stg1", 60
+    a["G5"], a["H5"] = "Worker", 180
+    # 退還區右移到 U..:Product(21) BM(22) 機型(23) ag(24) 月份(25)
+    a.cell(row=4, column=21, value="Product")
+    a.cell(row=4, column=22, value="BM Group")
+    a.cell(row=4, column=23, value="機型")
+    a.cell(row=4, column=24, value="ag")
+    a.cell(row=4, column=25, value="2026-07")
+    a.cell(row=5, column=21, value="old-a")
+    a.cell(row=5, column=22, value="network1")
+    a.cell(row=5, column=23, value="std-64")
+    a.cell(row=5, column=24, value="ag1")
+    a.cell(row=5, column=25, value=3)
+    hs = wb.create_sheet("HW_SKU")
+    hs.append(["name", "vcore_per_node", "usable_ratio"])
+    hs.append(["std-64", 64, 0.8])
+    wb.create_sheet("HW_Current").append(["fab", "bm_group", "sku", "count"])
+    wb.create_sheet("HW_MoveIn").append(
+        ["fab", "bm_group", "sku", "month", "count"])
+    wb.save(path)
+
+    pi = import_v2(path)
+    a1 = Pool(fab="A", bm_group="network1")
+    vd = [v for v in pi.vm_demands if v.product == "giga"]
+    assert vd and vd[0].cluster == "stg1" and vd[0].vm_size_vcore == 60
+    assert pi.vm_batch(a1, "2026-07") == [(60, 3)]         # 月份自 H 讀對
+    assert pi.return_by_sku(a1, "2026-07") == {"std-64": 3}  # 退還區右移後讀對
+
+
 def test_hw_current_ag_and_caps(tmp_path):
     from openpyxl import Workbook
     path = tmp_path / "ag.xlsx"

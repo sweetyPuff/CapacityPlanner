@@ -181,15 +181,19 @@ def import_v2(path) -> PlanInput:
     fab_sheets = [n for n in wb_v.sheetnames if n not in NON_FAB_SHEETS]
     for name in fab_sheets:
         ws = wb_v[name]
-        # 判斷格式:檢查 C4 是否為 "VM vcore"(新格式) 或月份(舊格式)
-        c4_value = ws.cell(row=4, column=3).value
-        is_new_format = c4_value == "VM vcore"
+        # 判斷格式:C4="Cluster"(新格式含 cluster 欄,整區右移 1)、
+        # C4="VM vcore"(新格式無 cluster 欄)、否則為舊格式(月份自 C)。
+        has_cluster = ws.cell(row=4, column=3).value == "Cluster"
+        off = 1 if has_cluster else 0
+        vmvcore_col = 3 + off
+        is_new_format = ws.cell(row=4, column=vmvcore_col).value == "VM vcore"
 
         if is_new_format:
-            # 選配 Menu 欄(F):有的話月份右移到 G(7),該欄區分 Worker / 菜單(new build)
-            has_menu = ws.cell(row=4, column=6).value == "Menu"
-            demand_cols = _month_columns(ws, 4, 7 if has_menu else 6,
-                                         parser, name)   # Return 月份自 W(23)
+            menu_col = 6 + off
+            # 選配 Menu 欄:有的話月份右移一欄,該欄區分 Worker / 菜單(new build)
+            has_menu = ws.cell(row=4, column=menu_col).value == "Menu"
+            demand_cols = _month_columns(
+                ws, 4, (7 if has_menu else 6) + off, parser, name)
             row = 5
             while ws.cell(row=row, column=1).value is not None:
                 product = str(ws.cell(row=row, column=1).value)
@@ -198,10 +202,12 @@ def import_v2(path) -> PlanInput:
                     continue
                 group = str(ws.cell(row=row, column=2).value)
                 pool = Pool(fab=name, bm_group=group)
+                cluster = (str(ws.cell(row=row, column=3).value or "")
+                           if has_cluster else "")
 
                 # Menu 欄非 Worker → new build 列(月份填當月建幾個 cluster)
                 if has_menu:
-                    mv = ws.cell(row=row, column=6).value
+                    mv = ws.cell(row=row, column=menu_col).value
                     menu = str(mv).strip() if mv not in (None, "") else ""
                     if menu and menu.lower() != "worker":
                         for col, month in demand_cols:
@@ -211,14 +217,14 @@ def import_v2(path) -> PlanInput:
                             months.add(month)
                             if cnt:
                                 new_builds.append(NewBuild(
-                                    pool=pool, cluster=product, menu=menu,
-                                    month=month, count=int(cnt)))
+                                    pool=pool, cluster=(cluster or product),
+                                    menu=menu, month=month, count=int(cnt)))
                         row += 1
                         continue
 
-                vm_size = ws.cell(row=row, column=3).value
-                max_per = ws.cell(row=row, column=4).value
-                coresid_raw = ws.cell(row=row, column=5).value
+                vm_size = ws.cell(row=row, column=vmvcore_col).value
+                max_per = ws.cell(row=row, column=4 + off).value
+                coresid_raw = ws.cell(row=row, column=5 + off).value
                 if vm_size in (None, ""):
                     # 粗粒度需求
                     for col, month in demand_cols:
@@ -226,19 +232,21 @@ def import_v2(path) -> PlanInput:
                         vcore = _numeric(ws.cell(row=row, column=col).value, issues, name, coord)
                         months.add(month)
                         if vcore:
-                            demands.append(DemandDelta(pool=pool, product=product,
-                                                       month=month, vcore=vcore))
+                            demands.append(DemandDelta(
+                                pool=pool, product=product, month=month,
+                                vcore=vcore, cluster=cluster))
                 else:
                     # detail:每顆 VM 的 vcore 尺寸,顆數由 vcore ÷ size 反推
                     # Guard C (VM vcore):必須是正整數
+                    vcol = get_column_letter(vmvcore_col)
                     try:
                         size = int(vm_size)
                         if size <= 0:
                             raise ValueError("非正整數")
                     except (TypeError, ValueError):
                         issues.append(ImportIssue(
-                            "error", name, f"C{row}",
-                            f"C{row} 產品 {product} 的 VM vcore '{vm_size}' 非正整數,該列已跳過"))
+                            "error", name, f"{vcol}{row}",
+                            f"{vcol}{row} 產品 {product} 的 VM vcore '{vm_size}' 非正整數,該列已跳過"))
                         row += 1
                         continue
 
@@ -254,13 +262,14 @@ def import_v2(path) -> PlanInput:
                                 "warning", name, coord,
                                 f"{coord} 產品 {product} 的 vcore {vcore} 非 VM 規格 {size} "
                                 f"的整數倍,已進位為 {count} 台({count * size} vcore)"))
-                        vm_demands.append(VmSpecDemand(pool=pool, product=product,
-                                                       month=month, vm_size_vcore=size,
-                                                       count=count))
+                        vm_demands.append(VmSpecDemand(
+                            pool=pool, product=product, month=month,
+                            vm_size_vcore=size, count=count, cluster=cluster))
 
                     # Guard D (每台上限):非正整數時以 None 計
                     max_per_machine = None
                     if max_per not in (None, ""):
+                        mcol = get_column_letter(4 + off)
                         try:
                             max_per_val = int(max_per)
                             if max_per_val <= 0:
@@ -268,34 +277,38 @@ def import_v2(path) -> PlanInput:
                             max_per_machine = max_per_val
                         except (TypeError, ValueError):
                             issues.append(ImportIssue(
-                                "warning", name, f"D{row}",
-                                f"D{row} 每台上限 '{max_per}' 非正整數,以不限計"))
+                                "warning", name, f"{mcol}{row}",
+                                f"{mcol}{row} 每台上限 '{max_per}' 非正整數,以不限計"))
 
                     policies.append(ProductPolicy(
                         pool=pool, product=product, vm_size_vcore=size,
                         max_per_machine=max_per_machine,
                         co_residency=_parse_coresidency(coresid_raw)))
                 row += 1
-            # 退還:機型於 V(22);選配 ag 於 W(23)→ 月份右移到 X(24)
-            ret_has_ag = ws.cell(row=4, column=23).value == "ag"
-            return_cols = _month_columns(ws, 4, 24 if ret_has_ag else 23,
-                                         parser, name)
+            # 退還區同樣右移 off:Product(20+off) BM(21+off) 機型(22+off)
+            # 選配 ag(23+off)→ 月份自(24 或 23)+off
+            ret_p, ret_g = 20 + off, 21 + off
+            ret_sku_col, ret_ag_col = 22 + off, 23 + off
+            ret_has_ag = ws.cell(row=4, column=ret_ag_col).value == "ag"
+            return_cols = _month_columns(
+                ws, 4, (24 if ret_has_ag else 23) + off, parser, name)
             row = 5
-            while ws.cell(row=row, column=20).value is not None:
-                product = str(ws.cell(row=row, column=20).value)
-                group = str(ws.cell(row=row, column=21).value)
-                raw_sku = ws.cell(row=row, column=22).value
+            while ws.cell(row=row, column=ret_p).value is not None:
+                product = str(ws.cell(row=row, column=ret_p).value)
+                group = str(ws.cell(row=row, column=ret_g).value)
+                raw_sku = ws.cell(row=row, column=ret_sku_col).value
                 if raw_sku is None:
+                    scol = get_column_letter(ret_sku_col)
                     issues.append(ImportIssue(
-                        "warning", name, f"V{row}",
-                        f"V{row} Return 機型空白,以 {first_sku_name} 計"))
+                        "warning", name, f"{scol}{row}",
+                        f"{scol}{row} Return 機型空白,以 {first_sku_name} 計"))
                     sku_name = first_sku_name
                 else:
                     sku_name = valid_sku(raw_sku, name, row)
                     if sku_name is None:
                         row += 1
                         continue
-                ret_ag = (str(ws.cell(row=row, column=23).value or "")
+                ret_ag = (str(ws.cell(row=row, column=ret_ag_col).value or "")
                           if ret_has_ag else "")
                 pool = Pool(fab=name, bm_group=group)
                 for col, month in return_cols:

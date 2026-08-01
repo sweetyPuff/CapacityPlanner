@@ -59,28 +59,31 @@ def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
     for d in plan_input.demands:
         if d.pool.fab != fab or d.month != month or not d.vcore:
             continue
+        cid = d.cluster or d.product            # cluster 為 solver 分組單位
         requirements.append({
             "total_resources": {"cpu_cores": int(d.vcore), "memory_mib": 0,
                                 "storage_gb": 0},
-            "node_role": "worker", "cluster_id": d.product, "ip_type": "plan",
+            "node_role": "worker", "cluster_id": cid, "ip_type": "plan",
             "network": d.pool.bm_group, "vm_specs": [worker_vm]})
         cpu = worker_vm["cpu_cores"]
-        req_meta.append({"cluster": d.product, "network": d.pool.bm_group,
-                         "vm_spec_vcore": cpu,
+        req_meta.append({"product": d.product, "cluster": cid,
+                         "network": d.pool.bm_group, "vm_spec_vcore": cpu,
                          "vm_count": math.ceil(d.vcore / cpu) if cpu else 0})
 
     for v in plan_input.vm_demands:
         if v.pool.fab != fab or v.month != month:
             continue
+        cid = v.cluster or v.product
         requirements.append({
             "total_resources": {"cpu_cores": v.vm_size_vcore * v.count,
                                 "memory_mib": 0, "storage_gb": 0},
-            "node_role": "worker", "cluster_id": v.product, "ip_type": "plan",
+            "node_role": "worker", "cluster_id": cid, "ip_type": "plan",
             "network": v.pool.bm_group,
             "vm_specs": [{"cpu_cores": v.vm_size_vcore, "memory_mib": 0,
                           "storage_gb": 0}],
             "min_total_vms": v.count, "max_total_vms": v.count})
-        req_meta.append({"cluster": v.product, "network": v.pool.bm_group,
+        req_meta.append({"product": v.product, "cluster": cid,
+                         "network": v.pool.bm_group,
                          "vm_spec_vcore": v.vm_size_vcore, "vm_count": v.count})
 
     in_stock: list = []
@@ -117,7 +120,8 @@ def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
 class DemandOrderRow:
     fab: str
     network: str
-    demand: str
+    product: str
+    cluster: str
     month: str
     vm_spec_vcore: int
     vm_count: int
@@ -181,6 +185,17 @@ def execution_plan(plan_input: PlanInput, month: str, solve_fn):
             buys[(fab, bm.get("network", ""))][
                 bought_type_of.get(bm.get("id"), "?")] += 1
 
+        # 需求單列:每個 requirement 一列(在本 fab 迴圈內,用本 fab 的 req_meta/agg)
+        for ridx, meta in enumerate(req_meta):
+            by_sku = {sku: {"vm": c["vm"], "bm": len(c["bm"]),
+                            "new": len(c["new"])}
+                      for sku, c in agg.get(ridx, {}).items()}
+            rows.append(DemandOrderRow(
+                fab=fab, network=meta["network"], product=meta["product"],
+                cluster=meta["cluster"], month=month,
+                vm_spec_vcore=meta["vm_spec_vcore"],
+                vm_count=meta["vm_count"], by_sku=by_sku))
+
     # 空 AG 也畫:補上 HW_Caps 宣告、但本月沒放 VM 的 AG(看得出分散空間)
     declared: dict = defaultdict(set)
     for cap in plan_input.caps:
@@ -189,15 +204,6 @@ def execution_plan(plan_input: PlanInput, month: str, solve_fn):
         for network in tree[fab]:
             for ag in declared.get((fab, network), ()):
                 tree[fab][network].setdefault(ag or "-", {})
-
-        for ridx, meta in enumerate(req_meta):
-            by_sku = {sku: {"vm": c["vm"], "bm": len(c["bm"]),
-                            "new": len(c["new"])}
-                      for sku, c in agg.get(ridx, {}).items()}
-            rows.append(DemandOrderRow(
-                fab=fab, network=meta["network"], demand=meta["cluster"],
-                month=month, vm_spec_vcore=meta["vm_spec_vcore"],
-                vm_count=meta["vm_count"], by_sku=by_sku))
     return rows, buys, tree
 
 
@@ -220,11 +226,12 @@ def demand_order_frames(rows: list, buys: dict):
     """(orders_df, buy_df):orders = 每列一個需求;buy = 去重的實際採購清單。"""
     import pandas as pd
     orders = pd.DataFrame([{
-        "Fab": r.fab, "Network": r.network, "Demand": r.demand,
-        "VM 規格": f"{r.vm_spec_vcore}vcore", "VM 台數": r.vm_count,
+        "Fab": r.fab, "Network": r.network, "Demand": r.product,
+        "Cluster": r.cluster, "VM 規格": f"{r.vm_spec_vcore}vcore",
+        "VM 台數": r.vm_count,
         "建議實體機 (SKU×台;新=新採購,含共用)": _fmt_by_sku(r.by_sku),
         "Due": r.month} for r in rows],
-        columns=["Fab", "Network", "Demand", "VM 規格", "VM 台數",
+        columns=["Fab", "Network", "Demand", "Cluster", "VM 規格", "VM 台數",
                  "建議實體機 (SKU×台;新=新採購,含共用)", "Due"])
     buy = pd.DataFrame(
         [{"Fab": f, "Network": n, "SKU": s, "採購台數": c}

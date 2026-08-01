@@ -36,7 +36,7 @@ def test_build_request_single_month():
     db = req["requirements"][1]
     assert db["cluster_id"] == "db" and db["min_total_vms"] == 1
     # req_meta:web = 8vcore worker × ceil(16/8)=2;db = 8vcore × 1
-    assert meta[0] == {"cluster": "web", "network": "network1",
+    assert meta[0] == {"product": "web", "cluster": "web", "network": "network1",
                        "vm_spec_vcore": 8, "vm_count": 2}
     assert meta[1]["vm_count"] == 1
     # in-stock 淨量:current 2 + movein(≤08) 1 − return(≤08) 1 = 2 台 std-64 ag1
@@ -59,7 +59,7 @@ def test_demand_order_maps_assignments():
             {"vm_id": "split-r1-s0-0", "baremetal_id": "buy-big-0", "ag": "ag2"},
         ]}
     rows, buys = demand_order(_pi(), "2026-08", lambda req: result)
-    by = {r.demand: r for r in rows}
+    by = {r.product: r for r in rows}
     # web:落 std-64(既有 1 台)+ big-128(新採購 1 台)
     assert by["web"].by_sku["std-64"] == {"vm": 1, "bm": 1, "new": 0}
     assert by["web"].by_sku["big-128"] == {"vm": 1, "bm": 1, "new": 1}
@@ -67,6 +67,18 @@ def test_demand_order_maps_assignments():
     assert by["db"].by_sku["big-128"] == {"vm": 1, "bm": 1, "new": 1}
     # 實際下單清單:big-128 ×1(去重後的真實採購)
     assert buys[("A", "network1")]["big-128"] == 1
+
+
+def test_cluster_field_drives_cluster_id():
+    pi = PlanInput(
+        skus={STD.name: STD, BIG.name: BIG}, months=["2026-08"], pools=[A1],
+        demands=[DemandDelta(pool=A1, product="giga", month="2026-08",
+                             vcore=16, cluster="stg1")],
+        vm_demands=[], moveins=[], returns=[], currents=[],
+        caps=[Cap(pool=A1, ag="ag1", max_bm=20)])
+    req, meta, _ = build_procurement_request(pi, "A", "2026-08")
+    assert req["requirements"][0]["cluster_id"] == "stg1"   # cluster,不是 product
+    assert meta[0]["product"] == "giga" and meta[0]["cluster"] == "stg1"
 
 
 def _shared_result():

@@ -177,9 +177,9 @@ elif page == "執行面需求單":
                 mime="application/vnd.openxmlformats-officedocument."
                      "spreadsheetml.sheet")
 
-            st.subheader("機櫃圖(AG → 實體機 → VM,顏色=product)")
-            st.caption("一台實體機框內出現多種顏色 = 被多個 product 共用;橘框=本月新採購;"
-                       "虛線空框=有宣告但本月沒放 VM 的 AG。滑鼠移到 VM 看完整 product·vcore。")
+            st.subheader("機櫃圖(AG → 實體機 → VM,顏色=cluster)")
+            st.caption("一台實體機框內出現多種顏色 = 被多個 cluster 共用;橘框=本月新採購;"
+                       "虛線空框=有宣告但本月沒放 VM 的 AG。滑鼠移到 VM 看完整 cluster·vcore。")
             svg = placement_svg(tree, month)
             components.html(f'<div style="overflow:auto">{svg}</div>',
                             height=620, scrolling=True)

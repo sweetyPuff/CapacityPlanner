@@ -30,6 +30,7 @@ class DemandDelta:
     product: str
     month: str
     vcore: float
+    cluster: str = ""          # 執行面需求單指定的 cluster;空=沿用 product
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class VmSpecDemand:
     month: str
     vm_size_vcore: int
     count: int
+    cluster: str = ""          # 執行面需求單指定的 cluster;空=沿用 product
 
 
 @dataclass(frozen=True)

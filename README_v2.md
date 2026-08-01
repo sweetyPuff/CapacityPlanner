@@ -35,13 +35,18 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
 |---|---|
 | A | Product(worker 產品名 / new build 的 cluster 名) |
 | B | BM Group(= network) |
-| C | VM vcore(空=粗粒度 worker;有值=每顆 VM 尺寸) |
-| D | 爆炸半徑 (1:x)(一台實體機最多住幾顆;空=不限) |
-| E | Tenant(自由=留空 / 指定群組名 / 獨佔) |
-| F | **Menu**(`Worker` = 一般需求列;`A`~`E` = new build,引用 Cluster_Menu) |
-| G 起 | 各月數值(worker 列=vcore;new build 列=當月建幾個 cluster) |
+| C | **Cluster**(執行面需求單指定的 cluster 名;空=沿用 Product) |
+| D | VM vcore(空=粗粒度 worker;有值=每顆 VM 尺寸) |
+| E | 爆炸半徑 (1:x)(一台實體機最多住幾顆;空=不限) |
+| F | Tenant(自由=留空 / 指定群組名 / 獨佔) |
+| G | **Menu**(`Worker` = 一般需求列;`A`~`E` = new build,引用 Cluster_Menu) |
+| H 起 | 各月數值(worker 列=vcore;new build 列=當月建幾個 cluster) |
 
-退還區(同頁,T 欄起):`Product(T) | BM Group(U) | 機型(V) | ag(W,選配) | 月份(X 起)`
+退還區(同頁,U 欄起):`Product(U) | BM Group(V) | 機型(W) | ag(X,選配) | 月份(Y 起)`
+
+> **相容**:`Cluster` 欄為選配 —— 匯入以 `C4` 是否為 `"Cluster"` 判斷,有則整區右移一欄,
+> 無則沿用舊版面(VM vcore 在 C)。`cluster` 是 solver 的分組單位(反親和/打散),也是執行面
+> 需求單與機櫃圖的著色/標籤依據;空時 fallback 回 Product。
 
 ### 硬體 / 拓撲表
 
