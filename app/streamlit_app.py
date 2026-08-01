@@ -8,9 +8,13 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import io
+
+from captool.exporter import export_demand_order
 from captool.importer import CapacityImportError, import_any
 from captool.models import ImportIssue
 from captool.solver.horizon_adapter import http_solve_fn, plan_horizon
+from captool.solver.procure_adapter import demand_order, demand_order_frames
 from captool.summary import capacity_summary
 from captool.viewmodel import prometheus_ag_placeholder
 
@@ -19,6 +23,7 @@ st.set_page_config(page_title="容量規劃工具", layout="wide")
 
 def _load(uploaded) -> None:
     st.session_state.pop("horizon", None)
+    st.session_state.pop("demand_order", None)
     tmp_file = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     tmp_file.write(uploaded.getvalue())
     tmp_path = tmp_file.name
@@ -46,7 +51,7 @@ with st.sidebar:
     uploaded = st.file_uploader("上傳 Excel(v2)", type=["xlsx"])
     if uploaded is not None and st.session_state.get("source_file_id") != uploaded.file_id:
         _load(uploaded)
-    page = st.radio("頁面", ["總表", "匯入報告"])
+    page = st.radio("頁面", ["總表", "執行面需求單", "匯入報告"])
     solver_url = st.text_input("Solver 端點",
                                value="http://localhost:50051/v1/capacity/plan")
 
@@ -131,3 +136,42 @@ elif page == "總表":
                "供 expand / delete 分配各 AG。目前為假資料。")
     st.dataframe(prometheus_ag_placeholder(), use_container_width=True,
                  hide_index=True)
+
+elif page == "執行面需求單":
+    st.header("執行面需求單(單月已確定需求 → 逐需求實體機)")
+    st.caption("月底整理「下個月已確定需求」時用。走 solver 單期 procure 端點,"
+               "回傳逐需求的真實落點(哪個 SKU、幾台、其中幾台新採購),非估算分攤。"
+               "in-stock 起點 = 現況 + 到目標月的進機 − 退還。")
+    month = st.selectbox("目標月(下個月已確定需求)", plan_input.months)
+    procure_url = solver_url.replace("capacity/plan", "capacity/procure")
+    st.caption(f"procure 端點:{procure_url}")
+    if st.button("產生需求單"):
+        try:
+            rows, buys = demand_order(plan_input, month,
+                                      http_solve_fn(procure_url))
+            st.session_state["demand_order"] = (month, rows, buys)
+        except Exception as e:  # noqa: BLE001 — 對外呼叫,任何錯都回報
+            st.session_state.pop("demand_order", None)
+            st.error(f"呼叫 procure 失敗:{e}(確認 server 有起、且該月有需求)")
+    do = st.session_state.get("demand_order")
+    if do and do[0] == month:
+        _, rows, buys = do
+        orders_df, buy_df = demand_order_frames(rows, buys)
+        if orders_df.empty:
+            st.warning(f"{month} 沒有需求列。")
+        else:
+            st.subheader("需求單(每列一個需求)")
+            st.caption("「建議實體機」台數含共用(一台機可同住多需求的 VM);"
+                       "真正下單以下方去重清單為準。")
+            st.dataframe(orders_df, use_container_width=True, hide_index=True)
+            st.subheader("本月實際採購清單(去重,下單依據)")
+            st.dataframe(buy_df, use_container_width=True, hide_index=True)
+            buf = io.BytesIO()
+            export_demand_order(orders_df, buy_df, month, buf)
+            st.download_button(
+                "下載需求單 (xlsx)", buf.getvalue(),
+                file_name=f"demand_order_{month}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument."
+                     "spreadsheetml.sheet")
+    else:
+        st.info("選擇目標月後按「產生需求單」。")

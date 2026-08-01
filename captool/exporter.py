@@ -28,6 +28,30 @@ def _style_row(ws, row_idx: int, fill=None) -> None:
             cell.fill = fill
 
 
+def export_demand_order(orders_df, buy_df, month: str, path) -> None:
+    """執行面需求單:兩個分頁「需求單」(每列一需求)+「採購清單」(去重下單依據)。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "需求單"
+    ws.append([f"執行面需求單 —— Due {month}"])
+    ws["A1"].font = _BOLD
+    ws.append(list(orders_df.columns))
+    _style_row(ws, ws.max_row)
+    for _, r in orders_df.iterrows():
+        ws.append([r[c] for c in orders_df.columns])
+        _style_row(ws, ws.max_row)
+
+    wb2 = wb.create_sheet("採購清單")
+    wb2.append(["實際採購清單(去重;下單依據)"])
+    wb2["A1"].font = _BOLD
+    wb2.append(list(buy_df.columns))
+    _style_row(wb2, wb2.max_row)
+    for _, r in buy_df.iterrows():
+        wb2.append([r[c] for c in buy_df.columns])
+        _style_row(wb2, wb2.max_row)
+    wb.save(path)
+
+
 def export_summary(plan_input: PlanInput, plan_result: PlanResult, path) -> None:
     wb = Workbook()
     ws = wb.active

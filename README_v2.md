@@ -88,7 +88,28 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
   **沒有 cluster/demand 欄位**(solver 決議 #21/#37 刻意不做逐需求)。逐 cluster→SKU 需另呼叫
   `/v1/placement/split-and-solve` 逐 VM 求解,且分配是任意 tie-break、語意模糊,故不採。
 
-## 4. 安裝與執行
+## 4. 執行面需求單(單月,procure)
+
+規劃面(§3 總表)給你 + PM 看**多月整體方向**;**執行面需求單**是另一回事 ——
+只在**月底整理「下個月已確定需求」時**才產生,交給執行工程師照著備料。
+
+- **端點**:走 solver **單期** `/v1/capacity/procure`(不是多月 `plan`)。它回傳
+  `assignments`(逐 VM→BM)+ `bought_type_of`(bought bm→SKU),所以逐需求 → SKU 是
+  **真實落點,不是估算分攤**。逐需求歸屬靠 `ResourceRequirement.cluster_id` +
+  synthetic VM id `split-r{idx}` 對回我方送出的順序 —— **無跨團隊相依,不需 solver 端改**。
+- **UI**:「執行面需求單」頁 → 選目標月 → 產生。輸出兩張表 +「下載需求單 (xlsx)」:
+  1. **需求單**(每列一個需求):`Demand | VM 規格×台 | 建議實體機(SKU×台,其中新採購) | Due`
+  2. **實際採購清單**(去重,下單依據):`Fab | Network | SKU | 採購台數`
+- **in-stock 起點** = 現況 + 到目標月(含)的進機 − 退還。
+- **共用注意**:一台實體機可同住多需求的 VM,所以「建議實體機」台數**跨需求會重複計**;
+  真正要下的採購以**去重採購清單**為準。
+- 程式:`captool/solver/procure_adapter.py`(`demand_order` / `demand_order_frames`)、
+  匯出 `captool/exporter.py::export_demand_order`。
+
+> 規劃(方向) vs 執行(單月落地)分離,也化解了「多月批量預購 vs 逐月分攤」的疑慮 ——
+> 執行面是單月確定需求,不做跨月分攤。
+
+## 5. 安裝與執行
 
 ### 4.1 安裝(本工具)
 
@@ -147,10 +168,14 @@ UI 左側「Solver 端點」預設 `http://localhost:50051/v1/capacity/plan`,對
 .venv/bin/python -m pytest              # macOS / Linux
 ```
 
-## 5. 現況與待辦
+## 6. 現況與待辦
 
 **已完成(worker 路徑,live 驗證)**:v2 匯入(統一版面 + Menu 欄 + AG)、horizon adapter、
-5 區塊 summary + filter、實體機需求分 SKU。83 tests。
+規劃面 summary(區塊 1–6,含需求↔供給機型對照)+ filter、**執行面需求單(單期 procure,
+逐需求真實落點 + xlsx)**。85 tests。
+
+> 註:原本要請同事在多月報表曝露 assignment,後來發現**單期 `procure` 端點本來就回 assignments**,
+> 執行面需求單直接用它即可 —— 該跨團隊需求已作廢。
 
 **待辦**:
 - **control-plane 菜單展開成 solver request** —— 卡在 §6.2:solver 的 `NodeRole` enum 只有
@@ -160,7 +185,7 @@ UI 左側「Solver 端點」預設 `http://localhost:50051/v1/capacity/plan`,對
 - moveins / returns → `committed_stock` 的時序對應;worker `vm_specs` 來源(目前固定 8-core)。
 - Prometheus 整合(區塊 6 目前假資料)。
 
-## 6. 開發注意
+## 7. 開發注意
 
 改動 `captool/` 的 model 或新增函式後,長跑的 Streamlit server 會抱著**舊模組快取**,
 出現 `AttributeError` / `cannot import name` —— **重啟 `streamlit run` 即可**。
