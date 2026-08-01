@@ -31,6 +31,7 @@ class DemandDelta:
     month: str
     vcore: float
     cluster: str = ""          # 執行面需求單指定的 cluster;空=沿用 product
+    tenant: str = "free"       # 共居:free / exclusive / 指定群組名
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class VmSpecDemand:
     vm_size_vcore: int
     count: int
     cluster: str = ""          # 執行面需求單指定的 cluster;空=沿用 product
+    tenant: str = "free"       # 共居:free / exclusive / 指定群組名
 
 
 @dataclass(frozen=True)

@@ -67,6 +67,7 @@ def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
             "network": d.pool.bm_group, "vm_specs": [worker_vm]})
         cpu = worker_vm["cpu_cores"]
         req_meta.append({"product": d.product, "cluster": cid,
+                         "tenant": d.tenant or "free",
                          "network": d.pool.bm_group, "vm_spec_vcore": cpu,
                          "vm_count": math.ceil(d.vcore / cpu) if cpu else 0})
 
@@ -83,6 +84,7 @@ def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
                           "storage_gb": 0}],
             "min_total_vms": v.count, "max_total_vms": v.count})
         req_meta.append({"product": v.product, "cluster": cid,
+                         "tenant": v.tenant or "free",
                          "network": v.pool.bm_group,
                          "vm_spec_vcore": v.vm_size_vcore, "vm_count": v.count})
 
@@ -129,12 +131,24 @@ class DemandOrderRow:
     by_sku: dict = field(default_factory=dict)
 
 
+def _partition_key(meta: dict):
+    """租戶 → partition 鍵。exclusive=每 cluster 自成一組;群組名=同名一組;free=一組。
+    排序:free(0) → 群組(1) → 獨佔(2),同類再依名稱,結果穩定。"""
+    t = meta.get("tenant") or "free"
+    if t == "exclusive":
+        return (2, meta["cluster"])
+    if t == "free":
+        return (0, "")
+    return (1, t)
+
+
 def execution_plan(plan_input: PlanInput, month: str, solve_fn):
-    """單次求解(每 fab 一次 procure),回 (rows, buys, tree)。
-    - rows:需求單(每列一需求)。
-    - buys[(fab, network)][sku]:去重的實際採購台數。
-    - tree[fab][network][ag][bm_id] = {sku, is_new, vms:[cluster,...]}:
-      逐台實體機住了哪些 VM(供機櫃圖用;共用機一眼可見)。
+    """依租戶分 partition、分開求解、既有機用過即從池中移除(下一 partition 拿不到)
+    → 不同租戶天生不共住。回 (rows, buys, tree)。
+
+    solver 無原生租戶/獨佔約束(只有 C3/C4/C5),故隔離在我方以「分池序解」達成。
+    註:AG 採購上限(caps)目前未跨 partition 遞減,多 partition 同 AG 大量採購時可能超額
+    (§ 待辦);sample caps 寬鬆不受影響。
     """
     rows: list = []
     buys: dict = defaultdict(lambda: defaultdict(int))
@@ -143,58 +157,85 @@ def execution_plan(plan_input: PlanInput, month: str, solve_fn):
         req, req_meta, bm_sku = build_procurement_request(plan_input, fab, month)
         if not req["requirements"]:
             continue
-        res = solve_fn(req)
-        bought_type_of = res.get("bought_type_of", {})
-        bought_net = {b.get("id"): b.get("network", "")
-                      for b in res.get("bought_bms", [])}
 
-        agg: dict = defaultdict(lambda: defaultdict(
-            lambda: {"vm": 0, "bm": set(), "new": set()}))
-        for a in res.get("assignments", []):
-            vid, bm = a.get("vm_id", ""), a.get("baremetal_id", "")
-            if not vid.startswith("split-"):
-                continue
-            try:
-                ridx = int(vid.split("-")[1][1:])
-            except (IndexError, ValueError):
-                continue
-            is_new = bm in bought_type_of
-            sku = bought_type_of.get(bm) or bm_sku.get(bm, "?")
-            cell = agg[ridx][sku]
-            cell["vm"] += 1
-            cell["bm"].add(bm)
-            if is_new:
-                cell["new"].add(bm)
-            # 機櫃樹:in-stock id = f"{fab}~{network}~{sku}~{ag}~{k}"(~ 可安全 split)
-            cluster = req_meta[ridx]["cluster"] if ridx < len(req_meta) else "?"
-            ag = a.get("ag", "")
-            if is_new:
-                network = bought_net.get(bm, "")
-            else:
-                parts = bm.split("~")
-                network = parts[1] if len(parts) > 1 else ""
-                if not ag and len(parts) > 3:
-                    ag = parts[3]
-            node = tree.setdefault(fab, {}).setdefault(
-                network, {}).setdefault(ag or "-", {})
-            vcore = req_meta[ridx]["vm_spec_vcore"] if ridx < len(req_meta) else 0
-            node.setdefault(bm, {"sku": sku, "is_new": is_new, "vms": []})[
-                "vms"].append({"p": cluster, "v": vcore})
+        # 每個 requirement 綁上它的 meta 與空的 by_sku 累加器
+        entries = [{"req": r, "meta": m,
+                    "by": defaultdict(lambda: {"vm": 0, "bm": set(),
+                                               "new": set()})}
+                   for r, m in zip(req["requirements"], req_meta)]
+        parts: dict = defaultdict(list)
+        for e in entries:
+            parts[_partition_key(e["meta"])].append(e)
 
-        for bm in res.get("bought_bms", []):
-            buys[(fab, bm.get("network", ""))][
-                bought_type_of.get(bm.get("id"), "?")] += 1
+        pool = list(req["in_stock"])          # 逐 partition 遞減的既有機池
+        for pki, pkey in enumerate(sorted(parts)):
+            part = parts[pkey]
+            pr = {"requirements": [e["req"] for e in part],
+                  "in_stock": pool,
+                  "procurement_types": req["procurement_types"],
+                  "procurement_caps": req["procurement_caps"],
+                  "config": req["config"]}
+            res = solve_fn(pr)
+            bought_type_of = res.get("bought_type_of", {})
+            bought_net = {b.get("id"): b.get("network", "")
+                          for b in res.get("bought_bms", [])}
+            pool_ids = {bm["id"] for bm in pool}
+            used_instock: set = set()
 
-        # 需求單列:每個 requirement 一列(在本 fab 迴圈內,用本 fab 的 req_meta/agg)
-        for ridx, meta in enumerate(req_meta):
+            for a in res.get("assignments", []):
+                vid, bm = a.get("vm_id", ""), a.get("baremetal_id", "")
+                if not vid.startswith("split-"):
+                    continue
+                try:
+                    ridx = int(vid.split("-")[1][1:])
+                except (IndexError, ValueError):
+                    continue
+                if ridx >= len(part):
+                    continue
+                e = part[ridx]
+                is_new = bm in bought_type_of
+                sku = bought_type_of.get(bm) or bm_sku.get(bm, "?")
+                cell = e["by"][sku]
+                cell["vm"] += 1
+                cell["bm"].add(bm)
+                if is_new:
+                    cell["new"].add(bm)
+                else:
+                    if bm in pool_ids:
+                        used_instock.add(bm)
+                # 機櫃樹:bm id 以 partition 前綴命名(避免各 partition 的採購合成 id 相撞)
+                ag = a.get("ag", "")
+                if is_new:
+                    network = bought_net.get(bm, "")
+                else:
+                    seg = bm.split("~")           # fab~network~sku~ag~k
+                    network = seg[1] if len(seg) > 1 else ""
+                    if not ag and len(seg) > 3:
+                        ag = seg[3]
+                node = tree.setdefault(fab, {}).setdefault(
+                    network, {}).setdefault(ag or "-", {})
+                node.setdefault(f"p{pki}:{bm}",
+                                {"sku": sku, "is_new": is_new, "vms": []})[
+                    "vms"].append({"p": e["meta"]["cluster"],
+                                   "v": e["meta"]["vm_spec_vcore"]})
+
+            for bm in res.get("bought_bms", []):
+                buys[(fab, bm.get("network", ""))][
+                    bought_type_of.get(bm.get("id"), "?")] += 1
+            # 用掉的既有機從池中移除 → 下一 partition 不得再用(不共住、不重複計)
+            pool = [bm for bm in pool if bm["id"] not in used_instock]
+
+        # 需求單列:每個 requirement 一列(by_sku 來自其 partition 的累加器)
+        for e in entries:
+            m = e["meta"]
             by_sku = {sku: {"vm": c["vm"], "bm": len(c["bm"]),
                             "new": len(c["new"])}
-                      for sku, c in agg.get(ridx, {}).items()}
+                      for sku, c in e["by"].items()}
             rows.append(DemandOrderRow(
-                fab=fab, network=meta["network"], product=meta["product"],
-                cluster=meta["cluster"], month=month,
-                vm_spec_vcore=meta["vm_spec_vcore"],
-                vm_count=meta["vm_count"], by_sku=by_sku))
+                fab=fab, network=m["network"], product=m["product"],
+                cluster=m["cluster"], month=month,
+                vm_spec_vcore=m["vm_spec_vcore"], vm_count=m["vm_count"],
+                by_sku=by_sku))
 
     # 空 AG 也畫:補上 HW_Caps 宣告、但本月沒放 VM 的 AG(看得出分散空間)
     declared: dict = defaultdict(set)

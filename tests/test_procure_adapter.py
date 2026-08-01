@@ -36,8 +36,8 @@ def test_build_request_single_month():
     db = req["requirements"][1]
     assert db["cluster_id"] == "db" and db["min_total_vms"] == 1
     # req_meta:web = 8vcore worker × ceil(16/8)=2;db = 8vcore × 1
-    assert meta[0] == {"product": "web", "cluster": "web", "network": "network1",
-                       "vm_spec_vcore": 8, "vm_count": 2}
+    assert meta[0] == {"product": "web", "cluster": "web", "tenant": "free",
+                       "network": "network1", "vm_spec_vcore": 8, "vm_count": 2}
     assert meta[1]["vm_count"] == 1
     # in-stock 淨量:current 2 + movein(≤08) 1 − return(≤08) 1 = 2 台 std-64 ag1
     assert len(req["in_stock"]) == 2
@@ -81,6 +81,32 @@ def test_cluster_field_drives_cluster_id():
     assert meta[0]["product"] == "giga" and meta[0]["cluster"] == "stg1"
 
 
+def test_tenant_partitions_isolate_solves():
+    # 獨佔自成一組、free 同一組 → solve_fn 應被分開呼叫,requirements 互斥
+    pi = PlanInput(
+        skus={STD.name: STD}, months=["2026-08"], pools=[A1],
+        demands=[
+            DemandDelta(pool=A1, product="giga", month="2026-08", vcore=8,
+                        cluster="stg1", tenant="exclusive"),
+            DemandDelta(pool=A1, product="iso", month="2026-08", vcore=8,
+                        cluster="isoc", tenant="free"),
+            DemandDelta(pool=A1, product="db", month="2026-08", vcore=8,
+                        cluster="dbc", tenant="free"),
+        ],
+        vm_demands=[], moveins=[], returns=[], currents=[],
+        caps=[Cap(pool=A1, ag="ag1", max_bm=20)])
+    seen = []
+
+    def fake(req):
+        seen.append({r["cluster_id"] for r in req["requirements"]})
+        return {"assignments": [], "bought_bms": [], "bought_type_of": {}}
+
+    execution_plan(pi, "2026-08", fake)
+    assert {"stg1"} in seen           # 獨佔:自己一組
+    assert {"isoc", "dbc"} in seen    # free:同一組
+    assert len(seen) == 2             # 剛好兩次求解,互不混合
+
+
 def _shared_result():
     instock_bm = "A~network1~std-64~ag1~0"
     return {
@@ -95,16 +121,19 @@ def _shared_result():
 
 
 def test_execution_plan_tree_shows_sharing():
+    # web + db 皆 free(同 partition)→ 可共住同一台 big-128
     _, _, tree = execution_plan(_pi(), "2026-08", lambda req: _shared_result())
-    # buy-big-0 同住 web + db → 共用機一台;VM 帶 vcore
-    shared = tree["A"]["network1"]["ag2"]["buy-big-0"]
-    assert shared["sku"] == "big-128" and shared["is_new"] is True
+    # tree 的 bm key 以 partition 前綴命名,故用內容找(不寫死 key)
+    shared = next(bm for bm in tree["A"]["network1"]["ag2"].values()
+                  if bm["sku"] == "big-128")
+    assert shared["is_new"] is True
     assert sorted(vm["p"] for vm in shared["vms"]) == ["db", "web"]
     assert all("v" in vm for vm in shared["vms"])
     # 既有 std-64 在 ag1 住 web
-    ag1 = tree["A"]["network1"]["ag1"]["A~network1~std-64~ag1~0"]
-    assert [vm["p"] for vm in ag1["vms"]] == ["web"]
-    # 空 AG 也在(caps 宣告 ag1;此測資只有 network1 有 caps)
+    instock = next(bm for bm in tree["A"]["network1"]["ag1"].values()
+                   if bm["sku"] == "std-64")
+    assert [vm["p"] for vm in instock["vms"]] == ["web"]
+    # 空 AG 也在(caps 宣告 ag1)
     assert "ag1" in tree["A"]["network1"]
 
 

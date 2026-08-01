@@ -225,6 +225,7 @@ def import_v2(path) -> PlanInput:
                 vm_size = ws.cell(row=row, column=vmvcore_col).value
                 max_per = ws.cell(row=row, column=4 + off).value
                 coresid_raw = ws.cell(row=row, column=5 + off).value
+                tenant = _parse_coresidency(coresid_raw)   # free / exclusive / 群組名
                 if vm_size in (None, ""):
                     # 粗粒度需求
                     for col, month in demand_cols:
@@ -234,7 +235,7 @@ def import_v2(path) -> PlanInput:
                         if vcore:
                             demands.append(DemandDelta(
                                 pool=pool, product=product, month=month,
-                                vcore=vcore, cluster=cluster))
+                                vcore=vcore, cluster=cluster, tenant=tenant))
                 else:
                     # detail:每顆 VM 的 vcore 尺寸,顆數由 vcore ÷ size 反推
                     # Guard C (VM vcore):必須是正整數
@@ -264,7 +265,8 @@ def import_v2(path) -> PlanInput:
                                 f"的整數倍,已進位為 {count} 台({count * size} vcore)"))
                         vm_demands.append(VmSpecDemand(
                             pool=pool, product=product, month=month,
-                            vm_size_vcore=size, count=count, cluster=cluster))
+                            vm_size_vcore=size, count=count, cluster=cluster,
+                            tenant=tenant))
 
                     # Guard D (每台上限):非正整數時以 None 計
                     max_per_machine = None
