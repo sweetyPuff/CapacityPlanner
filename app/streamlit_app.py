@@ -10,11 +10,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import io
 
+import streamlit.components.v1 as components
+
 from captool.exporter import export_demand_order
 from captool.importer import CapacityImportError, import_any
 from captool.models import ImportIssue
+from captool.placement_viz import placement_svg
 from captool.solver.horizon_adapter import http_solve_fn, plan_horizon
-from captool.solver.procure_adapter import demand_order, demand_order_frames
+from captool.solver.procure_adapter import demand_order_frames, execution_plan
 from captool.summary import capacity_summary
 from captool.viewmodel import prometheus_ag_placeholder
 
@@ -147,15 +150,15 @@ elif page == "執行面需求單":
     st.caption(f"procure 端點:{procure_url}")
     if st.button("產生需求單"):
         try:
-            rows, buys = demand_order(plan_input, month,
-                                      http_solve_fn(procure_url))
-            st.session_state["demand_order"] = (month, rows, buys)
+            rows, buys, tree = execution_plan(plan_input, month,
+                                              http_solve_fn(procure_url))
+            st.session_state["demand_order"] = (month, rows, buys, tree)
         except Exception as e:  # noqa: BLE001 — 對外呼叫,任何錯都回報
             st.session_state.pop("demand_order", None)
             st.error(f"呼叫 procure 失敗:{e}(確認 server 有起、且該月有需求)")
     do = st.session_state.get("demand_order")
     if do and do[0] == month:
-        _, rows, buys = do
+        _, rows, buys, tree = do
         orders_df, buy_df = demand_order_frames(rows, buys)
         if orders_df.empty:
             st.warning(f"{month} 沒有需求列。")
@@ -173,5 +176,15 @@ elif page == "執行面需求單":
                 file_name=f"demand_order_{month}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument."
                      "spreadsheetml.sheet")
+
+            st.subheader("機櫃圖(AG → 實體機 → VM,顏色=product)")
+            st.caption("一台實體機框內出現多種顏色 = 被多個 product 共用;橘框=本月新採購;"
+                       "虛線空框=有宣告但本月沒放 VM 的 AG。滑鼠移到 VM 看完整 product·vcore。")
+            svg = placement_svg(tree, month)
+            components.html(f'<div style="overflow:auto">{svg}</div>',
+                            height=620, scrolling=True)
+            st.download_button("下載機櫃圖 (SVG)", svg.encode("utf-8"),
+                               file_name=f"rack_{month}.svg",
+                               mime="image/svg+xml")
     else:
         st.info("選擇目標月後按「產生需求單」。")

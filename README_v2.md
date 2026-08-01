@@ -103,7 +103,11 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
 - **in-stock 起點** = 現況 + 到目標月(含)的進機 − 退還。
 - **共用注意**:一台實體機可同住多需求的 VM,所以「建議實體機」台數**跨需求會重複計**;
   真正要下的採購以**去重採購清單**為準。
-- 程式:`captool/solver/procure_adapter.py`(`demand_order` / `demand_order_frames`)、
+- **機櫃圖**:表格下方畫「AG 機櫃 → 實體機(SKU;橘框=新採購,虛線=有宣告但本月空)→
+  VM(顏色=product,標 vcore)」。**一台機出現多色 = 被多個 product 共用,一眼可見**
+  (需求單表格看不出的資訊)。可「下載機櫃圖 (SVG)」。
+- 程式:`captool/solver/procure_adapter.py`(`execution_plan` 回 rows/buys/tree、
+  `demand_order`)、`captool/placement_viz.py`(`placement_svg`)、
   匯出 `captool/exporter.py::export_demand_order`。
 
 > 規劃(方向) vs 執行(單月落地)分離,也化解了「多月批量預購 vs 逐月分攤」的疑慮 ——

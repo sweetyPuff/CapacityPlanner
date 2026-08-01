@@ -125,17 +125,24 @@ class DemandOrderRow:
     by_sku: dict = field(default_factory=dict)
 
 
-def demand_order(plan_input: PlanInput, month: str, solve_fn):
-    """每個 fab 打一次 procure,組出 (rows, buys)。
-    buys[(fab, network)][sku] = 該月新採購台數(實際下單清單)。"""
+def execution_plan(plan_input: PlanInput, month: str, solve_fn):
+    """單次求解(每 fab 一次 procure),回 (rows, buys, tree)。
+    - rows:需求單(每列一需求)。
+    - buys[(fab, network)][sku]:去重的實際採購台數。
+    - tree[fab][network][ag][bm_id] = {sku, is_new, vms:[cluster,...]}:
+      逐台實體機住了哪些 VM(供機櫃圖用;共用機一眼可見)。
+    """
     rows: list = []
     buys: dict = defaultdict(lambda: defaultdict(int))
+    tree: dict = {}
     for fab in sorted({p.fab for p in plan_input.pools}):
         req, req_meta, bm_sku = build_procurement_request(plan_input, fab, month)
         if not req["requirements"]:
             continue
         res = solve_fn(req)
         bought_type_of = res.get("bought_type_of", {})
+        bought_net = {b.get("id"): b.get("network", "")
+                      for b in res.get("bought_bms", [])}
 
         agg: dict = defaultdict(lambda: defaultdict(
             lambda: {"vm": 0, "bm": set(), "new": set()}))
@@ -147,16 +154,41 @@ def demand_order(plan_input: PlanInput, month: str, solve_fn):
                 ridx = int(vid.split("-")[1][1:])
             except (IndexError, ValueError):
                 continue
+            is_new = bm in bought_type_of
             sku = bought_type_of.get(bm) or bm_sku.get(bm, "?")
             cell = agg[ridx][sku]
             cell["vm"] += 1
             cell["bm"].add(bm)
-            if bm in bought_type_of:
+            if is_new:
                 cell["new"].add(bm)
+            # 機櫃樹:in-stock id = f"{fab}~{network}~{sku}~{ag}~{k}"(~ 可安全 split)
+            cluster = req_meta[ridx]["cluster"] if ridx < len(req_meta) else "?"
+            ag = a.get("ag", "")
+            if is_new:
+                network = bought_net.get(bm, "")
+            else:
+                parts = bm.split("~")
+                network = parts[1] if len(parts) > 1 else ""
+                if not ag and len(parts) > 3:
+                    ag = parts[3]
+            node = tree.setdefault(fab, {}).setdefault(
+                network, {}).setdefault(ag or "-", {})
+            vcore = req_meta[ridx]["vm_spec_vcore"] if ridx < len(req_meta) else 0
+            node.setdefault(bm, {"sku": sku, "is_new": is_new, "vms": []})[
+                "vms"].append({"p": cluster, "v": vcore})
 
         for bm in res.get("bought_bms", []):
             buys[(fab, bm.get("network", ""))][
                 bought_type_of.get(bm.get("id"), "?")] += 1
+
+    # 空 AG 也畫:補上 HW_Caps 宣告、但本月沒放 VM 的 AG(看得出分散空間)
+    declared: dict = defaultdict(set)
+    for cap in plan_input.caps:
+        declared[(cap.pool.fab, cap.pool.bm_group)].add(cap.ag)
+    for fab in tree:
+        for network in tree[fab]:
+            for ag in declared.get((fab, network), ()):
+                tree[fab][network].setdefault(ag or "-", {})
 
         for ridx, meta in enumerate(req_meta):
             by_sku = {sku: {"vm": c["vm"], "bm": len(c["bm"]),
@@ -166,6 +198,12 @@ def demand_order(plan_input: PlanInput, month: str, solve_fn):
                 fab=fab, network=meta["network"], demand=meta["cluster"],
                 month=month, vm_spec_vcore=meta["vm_spec_vcore"],
                 vm_count=meta["vm_count"], by_sku=by_sku))
+    return rows, buys, tree
+
+
+def demand_order(plan_input: PlanInput, month: str, solve_fn):
+    """需求單 (rows, buys) —— execution_plan 的前兩項(相容既有呼叫/測試)。"""
+    rows, buys, _ = execution_plan(plan_input, month, solve_fn)
     return rows, buys
 
 

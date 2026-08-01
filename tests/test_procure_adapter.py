@@ -2,8 +2,9 @@
 request 組裝(單月 in-stock 淨量)與 assignments → 需求單 的映射,不需 live solver。"""
 from captool.models import (Cap, CurrentStock, DemandDelta, MoveIn, NodeReturn,
                             PlanInput, Pool, Sku, VmSpecDemand)
+from captool.placement_viz import placement_svg
 from captool.solver.procure_adapter import (build_procurement_request,
-                                            demand_order)
+                                            demand_order, execution_plan)
 
 STD = Sku(name="std-64", vcore_per_node=64, usable_ratio=0.8)   # sellable 51
 BIG = Sku(name="big-128", vcore_per_node=128, usable_ratio=0.8)
@@ -66,3 +67,38 @@ def test_demand_order_maps_assignments():
     assert by["db"].by_sku["big-128"] == {"vm": 1, "bm": 1, "new": 1}
     # 實際下單清單:big-128 ×1(去重後的真實採購)
     assert buys[("A", "network1")]["big-128"] == 1
+
+
+def _shared_result():
+    instock_bm = "A~network1~std-64~ag1~0"
+    return {
+        "success": True,
+        "bought_type_of": {"buy-big-0": "big-128"},
+        "bought_bms": [{"id": "buy-big-0", "network": "network1"}],
+        "assignments": [
+            {"vm_id": "split-r0-s0-0", "baremetal_id": instock_bm, "ag": "ag1"},
+            {"vm_id": "split-r0-s0-1", "baremetal_id": "buy-big-0", "ag": "ag2"},
+            {"vm_id": "split-r1-s0-0", "baremetal_id": "buy-big-0", "ag": "ag2"},
+        ]}
+
+
+def test_execution_plan_tree_shows_sharing():
+    _, _, tree = execution_plan(_pi(), "2026-08", lambda req: _shared_result())
+    # buy-big-0 同住 web + db → 共用機一台;VM 帶 vcore
+    shared = tree["A"]["network1"]["ag2"]["buy-big-0"]
+    assert shared["sku"] == "big-128" and shared["is_new"] is True
+    assert sorted(vm["p"] for vm in shared["vms"]) == ["db", "web"]
+    assert all("v" in vm for vm in shared["vms"])
+    # 既有 std-64 在 ag1 住 web
+    ag1 = tree["A"]["network1"]["ag1"]["A~network1~std-64~ag1~0"]
+    assert [vm["p"] for vm in ag1["vms"]] == ["web"]
+    # 空 AG 也在(caps 宣告 ag1;此測資只有 network1 有 caps)
+    assert "ag1" in tree["A"]["network1"]
+
+
+def test_placement_svg_renders():
+    _, _, tree = execution_plan(_pi(), "2026-08", lambda req: _shared_result())
+    svg = placement_svg(tree, "2026-08")
+    assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
+    for token in ("web", "db", "big-128", "AG=ag2", "[新]"):
+        assert token in svg
