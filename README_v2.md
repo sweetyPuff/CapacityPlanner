@@ -111,6 +111,10 @@ Excel(v2)──import_v2──► PlanInput ──horizon_adapter──► Capac
 - **租戶隔離(Tenant)**:solver 無原生租戶約束,故在我方以「**依租戶分 partition、分開序解、
   既有機用過即從池移除**」達成:`獨佔`=每 cluster 專屬機器;`群組名`=同名才可共住;`留空(free)`=
   只與 free 共住。(限制:AG 採購上限目前未跨 partition 遞減,多 partition 同 AG 大量採購可能超額。)
+- **合身機型(避免浪費)**:每個需求下 `allowed_bm_types` —— 只留「裝得下該 VM,且**更大也不會多住幾顆**
+  的機型被剔除」。例:60vcore VM,gpu-80(可售 64)與 big-128(102)都只住 1 顆 → 只留 gpu-80;
+  30vcore VM,big-128 能住 3 顆有 packing 好處 → 保留。注意 `可售 = node × usable_ratio`
+  (std-64 = 64×0.8 = 51,故裝不下 60)。
 - **機櫃圖**:表格下方畫「AG 機櫃 → 實體機(SKU;橘框=新採購,虛線=有宣告但本月空)→
   VM(顏色=product,標 vcore)」。**一台機出現多色 = 被多個 product 共用,一眼可見**
   (需求單表格看不出的資訊)。可「下載機櫃圖 (SVG)」。

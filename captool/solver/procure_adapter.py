@@ -48,6 +48,21 @@ def _net_instock(plan_input: PlanInput, fab: str, month: str) -> "dict[tuple, in
     return {k: v for k, v in net.items() if v > 0}
 
 
+def _allowed_types(skus: dict, vm_size: int) -> "list[str] | None":
+    """合身機型:裝得下 vm_size,且剔除『更大但每台裝的 VM 數不變』的機型
+    (那種只是浪費,無 packing 好處)。回 None = 不限制(合身集=全部或無)。"""
+    if not vm_size:
+        return None
+    cap = {n: int(math.floor(s.sellable_vcore)) for n, s in skus.items()}
+    fit = {n: c for n, c in cap.items() if c >= vm_size}
+    if not fit:
+        return None                       # 沒機型裝得下 → 交給 solver 回報
+    per = {n: c // vm_size for n, c in fit.items()}       # 每台可住幾顆
+    keep = [n for n in fit
+            if not any(fit[o] < fit[n] and per[o] >= per[n] for o in fit)]
+    return sorted(keep) if 0 < len(keep) < len(skus) else None
+
+
 def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
                               worker_vm: dict = DEFAULT_WORKER_VM,
                               max_solve_time_seconds: float = 10.0):
@@ -60,11 +75,14 @@ def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
         if d.pool.fab != fab or d.month != month or not d.vcore:
             continue
         cid = d.cluster or d.product            # cluster 為 solver 分組單位
-        requirements.append({
-            "total_resources": {"cpu_cores": int(d.vcore), "memory_mib": 0,
-                                "storage_gb": 0},
-            "node_role": "worker", "cluster_id": cid, "ip_type": "plan",
-            "network": d.pool.bm_group, "vm_specs": [worker_vm]})
+        r = {"total_resources": {"cpu_cores": int(d.vcore), "memory_mib": 0,
+                                 "storage_gb": 0},
+             "node_role": "worker", "cluster_id": cid, "ip_type": "plan",
+             "network": d.pool.bm_group, "vm_specs": [worker_vm]}
+        allowed = _allowed_types(plan_input.skus, worker_vm["cpu_cores"])
+        if allowed:
+            r["allowed_bm_types"] = allowed
+        requirements.append(r)
         cpu = worker_vm["cpu_cores"]
         req_meta.append({"product": d.product, "cluster": cid,
                          "tenant": d.tenant or "free",
@@ -75,14 +93,17 @@ def build_procurement_request(plan_input: PlanInput, fab: str, month: str,
         if v.pool.fab != fab or v.month != month:
             continue
         cid = v.cluster or v.product
-        requirements.append({
-            "total_resources": {"cpu_cores": v.vm_size_vcore * v.count,
-                                "memory_mib": 0, "storage_gb": 0},
-            "node_role": "worker", "cluster_id": cid, "ip_type": "plan",
-            "network": v.pool.bm_group,
-            "vm_specs": [{"cpu_cores": v.vm_size_vcore, "memory_mib": 0,
-                          "storage_gb": 0}],
-            "min_total_vms": v.count, "max_total_vms": v.count})
+        r = {"total_resources": {"cpu_cores": v.vm_size_vcore * v.count,
+                                 "memory_mib": 0, "storage_gb": 0},
+             "node_role": "worker", "cluster_id": cid, "ip_type": "plan",
+             "network": v.pool.bm_group,
+             "vm_specs": [{"cpu_cores": v.vm_size_vcore, "memory_mib": 0,
+                           "storage_gb": 0}],
+             "min_total_vms": v.count, "max_total_vms": v.count}
+        allowed = _allowed_types(plan_input.skus, v.vm_size_vcore)
+        if allowed:
+            r["allowed_bm_types"] = allowed
+        requirements.append(r)
         req_meta.append({"product": v.product, "cluster": cid,
                          "tenant": v.tenant or "free",
                          "network": v.pool.bm_group,

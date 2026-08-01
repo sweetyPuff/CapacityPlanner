@@ -3,11 +3,13 @@ request 組裝(單月 in-stock 淨量)與 assignments → 需求單 的映射,�
 from captool.models import (Cap, CurrentStock, DemandDelta, MoveIn, NodeReturn,
                             PlanInput, Pool, Sku, VmSpecDemand)
 from captool.placement_viz import placement_svg
-from captool.solver.procure_adapter import (build_procurement_request,
+from captool.solver.procure_adapter import (_allowed_types,
+                                            build_procurement_request,
                                             demand_order, execution_plan)
 
 STD = Sku(name="std-64", vcore_per_node=64, usable_ratio=0.8)   # sellable 51
-BIG = Sku(name="big-128", vcore_per_node=128, usable_ratio=0.8)
+GPU = Sku(name="gpu-80", vcore_per_node=80, usable_ratio=0.8)   # sellable 64
+BIG = Sku(name="big-128", vcore_per_node=128, usable_ratio=0.8)  # sellable 102
 A1 = Pool(fab="A", bm_group="network1")
 
 
@@ -67,6 +69,16 @@ def test_demand_order_maps_assignments():
     assert by["db"].by_sku["big-128"] == {"vm": 1, "bm": 1, "new": 1}
     # 實際下單清單:big-128 ×1(去重後的真實採購)
     assert buys[("A", "network1")]["big-128"] == 1
+
+
+def test_allowed_types_drops_wasteful_oversize():
+    skus = {"std-64": STD, "gpu-80": GPU, "big-128": BIG}  # 51 / 64 / 102
+    # 60vcore:std-64 裝不下;gpu-80 與 big-128 都只住 1 顆 → big-128 被 dominate
+    assert _allowed_types(skus, 60) == ["gpu-80"]
+    # 30vcore:越大裝越多(1/2/3 顆)→ 都保留 → 不限制
+    assert _allowed_types(skus, 30) is None
+    # 8vcore(worker):同理不限制
+    assert _allowed_types(skus, 8) is None
 
 
 def test_cluster_field_drives_cluster_id():
